@@ -275,6 +275,134 @@ export async function uploadAgreementPdfToDrive(
 }
 
 /**
+ * Otomatis memasang shortcut berkas dokumen agen (No Rekening, NPWP, KTP) ke folder nasabah
+ */
+export async function attachAgentDocShortcuts(
+  agentFolderId: string,
+  leadFolderId: string
+): Promise<number> {
+  const drive = await getDriveService();
+  try {
+    const existingRes = await drive.files.list({
+      q: `'${leadFolderId}' in parents and trashed = false`,
+      fields: 'files(id, name, mimeType, shortcutDetails)',
+      pageSize: 50
+    });
+    const existingFiles = existingRes.data.files || [];
+    const existingTargetIds = new Set<string>();
+    const existingNames = new Set<string>();
+
+    for (const f of existingFiles) {
+      if (f.name) existingNames.add(f.name.toLowerCase().trim());
+      if (f.shortcutDetails?.targetId) {
+        existingTargetIds.add(f.shortcutDetails.targetId);
+      }
+    }
+
+    const agentRes = await drive.files.list({
+      q: `'${agentFolderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`,
+      fields: 'files(id, name, mimeType)',
+      pageSize: 30
+    });
+    const agentDocs = agentRes.data.files || [];
+
+    let count = 0;
+    for (const doc of agentDocs) {
+      if (!doc.name || !doc.id) continue;
+      const clean = doc.name.toLowerCase().trim();
+      if (clean.includes('pr request') || clean.includes('agreement') || clean.includes('perjanjian')) {
+        continue;
+      }
+      if (existingTargetIds.has(doc.id) || existingNames.has(clean)) {
+        continue;
+      }
+
+      try {
+        await drive.files.create({
+          requestBody: {
+            name: doc.name,
+            mimeType: 'application/vnd.google-apps.shortcut',
+            shortcutDetails: { targetId: doc.id },
+            parents: [leadFolderId]
+          }
+        });
+        count++;
+      } catch (err: any) {
+        console.warn(`Gagal membuat shortcut dokumen agen ${doc.name}:`, err.message);
+      }
+    }
+    return count;
+  } catch (err: any) {
+    console.warn('Gagal memproses shortcut dokumen agen:', err.message);
+    return 0;
+  }
+}
+
+/**
+ * Otomatis mencari & memasang shortcut berkas PKS Bank ke folder nasabah
+ */
+export async function attachBankPKSShortcut(
+  bankName: string,
+  leadFolderId: string
+): Promise<boolean> {
+  const drive = await getDriveService();
+  try {
+    const rawBankClean = (bankName || '').toLowerCase().trim();
+    const bankKeywords = [
+      'danamon', 'uob', 'maybank', 'permata', 'ina',
+      'mandiri', 'bsi', 'cimb', 'muamalat', 'bukopin',
+      'ringkas', 'ganesha', 'bca', 'btn', 'bri', 'bni', 'hana'
+    ];
+    let matchedKeyword = '';
+    for (const kw of bankKeywords) {
+      if (rawBankClean.includes(kw)) {
+        matchedKeyword = kw;
+        break;
+      }
+    }
+    if (!matchedKeyword) matchedKeyword = rawBankClean.split(' ')[0] || '';
+
+    // Cek apakah shortcut/file PKS sudah ada di folder nasabah
+    const existing = await drive.files.list({
+      q: `'${leadFolderId}' in parents and trashed = false`,
+      fields: 'files(id, name, mimeType)',
+      pageSize: 30
+    });
+    const hasPks = (existing.data.files || []).some(
+      f => f.name && f.name.toLowerCase().includes('pks')
+    );
+    if (hasPks) return true;
+
+    // Cari PKS file untuk bank ini di Google Drive
+    const searchRes = await drive.files.list({
+      q: `name contains 'PKS' and trashed = false`,
+      fields: 'files(id, name, mimeType, shortcutDetails)',
+      pageSize: 60
+    });
+
+    const candidate = (searchRes.data.files || []).find(
+      f => f.name && f.name.toLowerCase().includes(matchedKeyword)
+    );
+
+    if (candidate && candidate.id) {
+      const targetId = candidate.shortcutDetails?.targetId || candidate.id;
+      await drive.files.create({
+        requestBody: {
+          name: candidate.name,
+          mimeType: 'application/vnd.google-apps.shortcut',
+          shortcutDetails: { targetId },
+          parents: [leadFolderId]
+        }
+      });
+      return true;
+    }
+  } catch (err: any) {
+    console.warn(`Gagal memasang shortcut PKS bank ${bankName}:`, err.message);
+  }
+  return false;
+}
+
+/**
  * Menjalankan seluruh alur transaksi ke Google Drive (persis flow Spreadsheet)
  */
 export async function processDealDriveWorkflow(
@@ -284,7 +412,16 @@ export async function processDealDriveWorkflow(
   const agentFolderId = await getOrCreateAgentFolder(deal.agentName);
   const leadFolder = await getOrCreateLeadFolder(agentFolderId, deal.customerName);
 
+  // 1. Pasang shortcut dokumen agen (No Rekening, NPWP, KTP) ke folder nasabah
+  await attachAgentDocShortcuts(agentFolderId, leadFolder.id);
+
+  // 2. Pasang shortcut berkas PKS Bank ke folder nasabah
+  await attachBankPKSShortcut(deal.bank, leadFolder.id);
+
+  // 3. Salin/perbarui berkas PR Request spreadsheet di folder nasabah
   const prResult = await syncPRSpreadsheetInDrive(deal, leadFolder.id, leadFolder.url);
+
+  // 4. Unggah berkas Agreement Pembagian Komisi Agent PDF 4 Halaman Utuh
   const agreementResult = await uploadAgreementPdfToDrive(deal, agreementPdfBuffer, leadFolder.id);
 
   return {

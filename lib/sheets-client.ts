@@ -39,6 +39,8 @@ export interface DealItem {
   leadsFolderUrl?: string;
   leadsFolderName?: string;
   hasLeadsFolder?: boolean;
+  prFolderUrl?: string;
+  prFileUrl?: string;
 }
 
 export function extractHyperlinkUrl(val: any): string {
@@ -190,6 +192,18 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
     let hasLeadsFolder = !!leadsFolderUrl || !!dbLeadsFolder;
     let leadsFolderName = moCode ? `${moCode} - ${cust}` : (dbLeadsFolder || cust);
 
+    // Ekstrak URL dari Kolom K Controller (Status PR / Folder PR)
+    const colKUrl = extractHyperlinkUrl(statusColK);
+    let prFolderUrl = '';
+    let prFileUrl = '';
+    if (colKUrl) {
+      if (colKUrl.includes('/drive/folders/')) {
+        prFolderUrl = colKUrl;
+      } else {
+        prFileUrl = colKUrl;
+      }
+    }
+
     // Tentukan syncStatus berdasarkan status dokumen PR yang sudah tercatat
     let syncStatus: 'SINKRON' | 'PERLU_TIMPA' | 'BELUM_ADA' = 'BELUM_ADA';
     const statusLower = statusColK.toLowerCase();
@@ -230,7 +244,9 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
       grouping,
       leadsFolderUrl,
       leadsFolderName,
-      hasLeadsFolder
+      hasLeadsFolder,
+      prFolderUrl,
+      prFileUrl
     };
 
     if (dealsMap[custKey]) {
@@ -243,6 +259,12 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
         if (!existing.leadsFolderUrl && leadsFolderUrl) {
           existing.leadsFolderUrl = leadsFolderUrl;
           existing.hasLeadsFolder = true;
+        }
+        if (!existing.prFolderUrl && prFolderUrl) {
+          existing.prFolderUrl = prFolderUrl;
+        }
+        if (!existing.prFileUrl && prFileUrl) {
+          existing.prFileUrl = prFileUrl;
         }
       } else if (comm > existing.commission) {
         existing.row = rowNum;
@@ -266,13 +288,16 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
 export async function updateRowStatusInController(
   row: number,
   partnerRow?: number | null,
-  prUrl?: string,
+  folderUrl?: string,
   company?: string,
-  amount?: number
+  amount?: number,
+  prUrl?: string
 ) {
   const sheets = await getSheetsService();
 
-  const statusValue = prUrl ? `=HYPERLINK("${prUrl}", "🟢 Ditimpa")` : '🟢 Ditimpa';
+  // Prioritas hyperlink: Folder PR Nasabah di Drive (sehingga attachment & dokumen bisa langsung diperiksa)
+  const targetLink = folderUrl || prUrl || '';
+  const statusValue = targetLink ? `=HYPERLINK("${targetLink}", "🟢 Ditimpa")` : '🟢 Ditimpa';
 
   const requests: { range: string; values: any[][] }[] = [
     {
