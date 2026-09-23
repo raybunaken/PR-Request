@@ -120,75 +120,101 @@ export async function syncPRSpreadsheetInDrive(
   const cleanCust = deal.customerName.replace(/[^a-zA-Z0-9 _-]/g, '').trim();
   const res = await drive.files.list({
     q: `'${leadFolderId}' in parents and trashed = false`,
-    fields: 'files(id, name, mimeType, webViewLink)'
+    fields: 'files(id, name, mimeType, webViewLink, shortcutDetails)'
   });
 
   const files = res.data.files || [];
-  const existingPR = files.find(
+  let prFileId = '';
+  let prUrl = '';
+  let isUpdated = false;
+
+  // 1. Cari kandidat file PR Request yang sesuai nama nasabah
+  const candidates = files.filter(
     f =>
       f.name &&
       f.name.toLowerCase().includes('pr request') &&
       f.name.toLowerCase().includes(cleanCust.toLowerCase())
   );
 
-  let prFileId = '';
-  let prUrl = '';
-  let isUpdated = false;
+  // 2. Loop dan verifikasi apakah candidate bisa diakses dengan Google Sheets API
+  for (const f of candidates) {
+    let candidateId = f.id;
+    if (f.mimeType === 'application/vnd.google-apps.shortcut' && f.shortcutDetails?.targetId) {
+      candidateId = f.shortcutDetails.targetId;
+    }
+    if (!candidateId) continue;
 
-  if (existingPR && existingPR.id) {
-    prFileId = existingPR.id;
-    prUrl = existingPR.webViewLink || `https://docs.google.com/spreadsheets/d/${prFileId}/edit`;
-    isUpdated = true;
-  } else {
-    // Buat salinan dari template PR
-    const targetFileName = `PR Request - Referral Fee Agent a.n. ${deal.agentName} - ${cleanCust}`;
-    const copyRes = await drive.files.copy({
-      fileId: KPR_CONFIG.TEMPLATE_PR_ID,
-      requestBody: {
-        name: targetFileName,
-        parents: [leadFolderId]
-      },
-      fields: 'id, name, webViewLink'
-    });
-
-    prFileId = copyRes.data.id!;
-    prUrl = copyRes.data.webViewLink || `https://docs.google.com/spreadsheets/d/${prFileId}/edit`;
+    try {
+      await sheets.spreadsheets.get({ spreadsheetId: candidateId, fields: 'spreadsheetId' });
+      prFileId = candidateId;
+      prUrl = f.webViewLink || `https://docs.google.com/spreadsheets/d/${candidateId}/edit`;
+      isUpdated = true;
+      break;
+    } catch {
+      console.warn(`File PR kandidat ${f.name} (id: ${candidateId}) tidak dapat diakses Sheets API`);
+    }
   }
 
-  // Isi ulang data sel PR Request
-  const today = new Date();
-  const dateStr = `${today.getMonth() + 1}/${today.getDate()}/${String(today.getFullYear()).slice(-2)}`;
+  // 3. Jika belum ada file PR yang valid & dapat diakses, salin dari template PR
+  if (!prFileId) {
+    const targetFileName = `PR Request - Referral Fee Agent a.n. ${deal.agentName} - ${cleanCust}`;
+    try {
+      const copyRes = await drive.files.copy({
+        fileId: KPR_CONFIG.TEMPLATE_PR_ID,
+        requestBody: {
+          name: targetFileName,
+          parents: [leadFolderId]
+        },
+        fields: 'id, name, webViewLink'
+      });
 
-  const cellUpdates = [
-    { range: "'PR Request'!G11", values: [[dateStr]] },
-    { range: "'PR Request'!D12", values: [[deal.company]] },
-    { range: "'PR Request'!D13", values: [['Fransisca Octarina']] },
-    { range: "'PR Request'!D14", values: [['CEO Team']] },
-    { range: "'PR Request'!D15", values: [[`Referral Fee Agent ${deal.payeeName}`]] },
-    { range: "'PR Request'!D17", values: [[deal.payeeName]] },
-    { range: "'PR Request'!D19", values: [[agent.bankName]] },
-    { range: "'PR Request'!D20", values: [[agent.accountNumber]] },
-    { range: "'PR Request'!D21", values: [[agent.accountName]] },
-    { range: "'PR Request'!D22", values: [[deal.targetAmount]] },
-    {
-      range: "'PR Request'!C25",
-      values: [[`Mortgage - Agent transaction\nCommission sharing a.n. ${deal.customerName}`]]
-    },
-    { range: "'PR Request'!F25", values: [['Cost Mortgage - Agent Transaction']] },
-    { range: "'PR Request'!G25", values: [['=D22']] },
-    { range: "'PR Request'!G32", values: [['=G25']] },
-    { range: "'PR Request'!D34", values: [[`=HYPERLINK("${leadFolderUrl}", "${deal.customerName}")`]] },
-    { range: "'PR Request'!B38", values: [['Fransisca Octarina']] },
-    { range: "'PR Request'!D38", values: [['Cheung Yik']] }
-  ];
-
-  await sheets.spreadsheets.values.batchUpdate({
-    spreadsheetId: prFileId,
-    requestBody: {
-      valueInputOption: 'USER_ENTERED',
-      data: cellUpdates
+      prFileId = copyRes.data.id!;
+      prUrl = copyRes.data.webViewLink || `https://docs.google.com/spreadsheets/d/${prFileId}/edit`;
+    } catch (err: any) {
+      console.warn(`Gagal menyalin template PR (quota atau izin): ${err.message}`);
     }
-  });
+  }
+
+  // 4. Perbarui sel-sel data PR jika file ID valid
+  if (prFileId) {
+    try {
+      const today = new Date();
+      const dateStr = `${today.getMonth() + 1}/${today.getDate()}/${String(today.getFullYear()).slice(-2)}`;
+
+      const cellUpdates = [
+        { range: "'PR Request'!G11", values: [[dateStr]] },
+        { range: "'PR Request'!D12", values: [[deal.company]] },
+        { range: "'PR Request'!D13", values: [['Fransisca Octarina']] },
+        { range: "'PR Request'!D14", values: [['CEO Team']] },
+        { range: "'PR Request'!D15", values: [[`Referral Fee Agent ${deal.payeeName}`]] },
+        { range: "'PR Request'!D17", values: [[deal.payeeName]] },
+        { range: "'PR Request'!D19", values: [[agent.bankName]] },
+        { range: "'PR Request'!D20", values: [[agent.accountNumber]] },
+        { range: "'PR Request'!D21", values: [[agent.accountName]] },
+        { range: "'PR Request'!D22", values: [[deal.targetAmount]] },
+        {
+          range: "'PR Request'!C25",
+          values: [[`Mortgage - Agent transaction\nCommission sharing a.n. ${deal.customerName}`]]
+        },
+        { range: "'PR Request'!F25", values: [['Cost Mortgage - Agent Transaction']] },
+        { range: "'PR Request'!G25", values: [['=D22']] },
+        { range: "'PR Request'!G32", values: [['=G25']] },
+        { range: "'PR Request'!D34", values: [[`=HYPERLINK("${leadFolderUrl}", "${deal.customerName}")`]] },
+        { range: "'PR Request'!B38", values: [['Fransisca Octarina']] },
+        { range: "'PR Request'!D38", values: [['Cheung Yik']] }
+      ];
+
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: prFileId,
+        requestBody: {
+          valueInputOption: 'USER_ENTERED',
+          data: cellUpdates
+        }
+      });
+    } catch (err: any) {
+      console.warn(`Peringatan: Gagal memperbarui nilai sel PR Request (${prFileId}):`, err.message);
+    }
+  }
 
   return { fileId: prFileId, prUrl, isUpdated };
 }
@@ -219,32 +245,36 @@ export async function uploadAgreementPdfToDrive(
   // Jika file sudah ada, UPDATE file secara in-place (mempertahankan quota pemilik asli)
   if (existingAgreements.length > 0) {
     const targetFile = existingAgreements[0];
-    const updateRes = await drive.files.update({
-      fileId: targetFile.id!,
-      requestBody: {
-        name: targetFileName
-      },
-      media: {
-        mimeType: 'application/pdf',
-        body: Readable.from(pdfBuffer)
-      },
-      fields: 'id, name, webViewLink'
-    });
+    try {
+      const updateRes = await drive.files.update({
+        fileId: targetFile.id!,
+        requestBody: {
+          name: targetFileName
+        },
+        media: {
+          mimeType: 'application/pdf',
+          body: Readable.from(pdfBuffer)
+        },
+        fields: 'id, name, webViewLink'
+      });
 
-    // Jika ada duplikat berlebih, bersihkan duplikatnya
-    for (let i = 1; i < existingAgreements.length; i++) {
-      try {
-        await drive.files.update({
-          fileId: existingAgreements[i].id!,
-          requestBody: { trashed: true }
-        });
-      } catch {}
+      // Jika ada duplikat berlebih, bersihkan duplikatnya
+      for (let i = 1; i < existingAgreements.length; i++) {
+        try {
+          await drive.files.update({
+            fileId: existingAgreements[i].id!,
+            requestBody: { trashed: true }
+          });
+        } catch {}
+      }
+
+      return {
+        fileId: updateRes.data.id!,
+        webViewLink: updateRes.data.webViewLink || `https://drive.google.com/file/d/${updateRes.data.id}/view`
+      };
+    } catch (err: any) {
+      console.warn(`Peringatan: Gagal memperbarui file agreement lama (${targetFile.id}):`, err.message);
     }
-
-    return {
-      fileId: updateRes.data.id!,
-      webViewLink: updateRes.data.webViewLink || `https://drive.google.com/file/d/${updateRes.data.id}/view`
-    };
   }
 
   // Jika belum ada berkas agreement sebelumnya, buat file baru
