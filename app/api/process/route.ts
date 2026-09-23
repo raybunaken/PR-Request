@@ -33,15 +33,36 @@ export async function POST(req: NextRequest) {
         // 2. Generate PR Excel Buffer
         await generatePRExcelBuffer(deal);
 
+        // 2b. Eksekusi automasi via Google Apps Script Web App (menjamin berkas PR Spreadsheet & Agreement PDF dibuat tanpa kendala kuota)
+        if (KPR_CONFIG.APPS_SCRIPT_WEBAPP_URL) {
+          try {
+            await fetch(KPR_CONFIG.APPS_SCRIPT_WEBAPP_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify({
+                row: deal.row,
+                partnerRow: deal.partnerRow
+              }),
+              redirect: 'follow'
+            });
+          } catch (err: any) {
+            console.warn(`Peringatan: Gagal memanggil Apps Script untuk ${deal.customerName}:`, err.message);
+          }
+        }
+
         let prUrl = '';
         let folderUrl = '';
         let leadsFolderUrl = deal.leadsFolderUrl || '';
 
         // 3. Jika Google Drive terhubung, sinkronkan langsung ke Google Drive
         if (driveConnected) {
-          const driveRes = await processDealDriveWorkflow(deal, agreementPdfBuffer);
-          prUrl = driveRes.prUrl;
-          folderUrl = driveRes.folderUrl;
+          try {
+            const driveRes = await processDealDriveWorkflow(deal, agreementPdfBuffer);
+            prUrl = driveRes.prUrl;
+            folderUrl = driveRes.folderUrl;
+          } catch (driveErr) {
+            console.warn(`Drive direct sync skipped:`, driveErr);
+          }
 
           // Jika diminta sekalian buat Folder Leads Finance
           if (syncLeadsFolder) {
