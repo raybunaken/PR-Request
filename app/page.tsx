@@ -106,6 +106,22 @@ export default function DashboardPage() {
 
   // Progress state for Leads Folder Action
   const [isProcessingLeads, setIsProcessingLeads] = useState<boolean>(false);
+  const [leadsModalData, setLeadsModalData] = useState<{
+    isOpen: boolean;
+    title: string;
+    items: Array<{
+      customerName: string;
+      folderName: string;
+      folderUrl: string;
+      hasSpa: boolean;
+      hasBankEmail: boolean;
+      isNew: boolean;
+    }>;
+  }>({
+    isOpen: false,
+    title: '',
+    items: []
+  });
 
   const fetchDeals = async (tabMode: 'PR_AGENT' | 'LEADS_FOLDER' = activeTab) => {
     setLoading(true);
@@ -381,7 +397,20 @@ export default function DashboardPage() {
         })
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.results && data.results.length > 0) {
+        const itemRes = data.results[0];
+        setLeadsModalData({
+          isOpen: true,
+          title: 'Folder Leads Finance Berhasil Dibuat',
+          items: [{
+            customerName: deal.customerName,
+            folderName: itemRes.folder?.name || deal.customerName,
+            folderUrl: itemRes.folder?.url || '',
+            hasSpa: !!itemRes.fileCheck?.hasSpa,
+            hasBankEmail: !!itemRes.fileCheck?.hasBankEmail,
+            isNew: !!itemRes.folder?.isNew
+          }]
+        });
         fetchDeals(activeTab);
       } else {
         alert(data.error || 'Gagal membuat Folder Leads.');
@@ -414,7 +443,19 @@ export default function DashboardPage() {
         body: JSON.stringify({ items })
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.results && data.results.length > 0) {
+        setLeadsModalData({
+          isOpen: true,
+          title: `Batch Folder Leads Selesai (${data.results.length} Folder)`,
+          items: data.results.map((r: any) => ({
+            customerName: r.customerName,
+            folderName: r.folder?.name || r.customerName,
+            folderUrl: r.folder?.url || '',
+            hasSpa: !!r.fileCheck?.hasSpa,
+            hasBankEmail: !!r.fileCheck?.hasBankEmail,
+            isNew: !!r.folder?.isNew
+          }))
+        });
         fetchDeals(activeTab);
       } else {
         alert(data.error || 'Gagal memproses batch Folder Leads.');
@@ -1409,6 +1450,99 @@ export default function DashboardPage() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Leads Folder Result Modal */}
+      {leadsModalData.isOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                <span>{leadsModalData.title}</span>
+              </h3>
+              <button
+                onClick={() => setLeadsModalData(prev => ({ ...prev, isOpen: false }))}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-4">
+              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 leading-relaxed">
+                <p className="font-semibold">
+                  Folder di Google Drive (Leads Akad Automation) telah berhasil dibuat dan terhubung.
+                </p>
+                <p className="text-emerald-700 mt-1">
+                  Folder ini adalah tempat penampungan berkas persetujuan pembiayaan dari bank (SPA / SP3K) dan Konfirmasi Plafond Bank untuk kelengkapan audit Finance.
+                </p>
+              </div>
+
+              <div className="max-h-72 overflow-y-auto space-y-2.5 border border-slate-100 rounded-xl p-3 bg-slate-50/50">
+                {leadsModalData.items.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-lg bg-white border border-slate-200/80 shadow-2xs space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-xs text-slate-900 truncate">
+                        {item.folderName}
+                      </span>
+                      {item.folderUrl && (
+                        <a
+                          href={item.folderUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors shrink-0"
+                        >
+                          <FolderOpen className="w-3.5 h-3.5" />
+                          <span>Buka di Drive</span>
+                          <ExternalLink className="w-3 h-3 ml-0.5 opacity-80" />
+                        </a>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100 text-[11px]">
+                      <span className="text-slate-500 font-medium">Status Berkas Bank:</span>
+                      {item.hasSpa ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          SPA Ada
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                          <Clock className="w-3 h-3 text-amber-600" />
+                          SPA Belum Diunggah
+                        </span>
+                      )}
+
+                      {item.hasBankEmail ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          Konfirmasi Bank Ada
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium bg-slate-100 text-slate-600">
+                          Konfirmasi Bank Belum Diunggah
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setLeadsModalData(prev => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                Tutup
+              </button>
+            </div>
           </div>
         </div>
       )}

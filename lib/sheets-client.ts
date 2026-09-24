@@ -259,6 +259,7 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
         if (!existing.leadsFolderUrl && leadsFolderUrl) {
           existing.leadsFolderUrl = leadsFolderUrl;
           existing.hasLeadsFolder = true;
+          existing.leadsFolderName = leadsFolderName;
         }
         if (!existing.prFolderUrl && prFolderUrl) {
           existing.prFolderUrl = prFolderUrl;
@@ -266,16 +267,17 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
         if (!existing.prFileUrl && prFileUrl) {
           existing.prFileUrl = prFileUrl;
         }
-      } else if (comm > existing.commission) {
-        existing.row = rowNum;
-        existing.dbRow = dbRow;
-        existing.commission = comm;
-        existing.targetAmount = targetAmount;
-        existing.statusColK = statusColK;
-        if (leadsFolderUrl) {
-          existing.leadsFolderUrl = leadsFolderUrl;
-          existing.hasLeadsFolder = true;
-        }
+      } else if (comm >= existing.commission) {
+        // Ambil data utama dari baris dengan komisi lebih besar (atau baris terbaru)
+        dealsMap[custKey] = {
+          ...item,
+          partnerRow: existing.row,
+          leadsFolderUrl: leadsFolderUrl || existing.leadsFolderUrl,
+          hasLeadsFolder: hasLeadsFolder || existing.hasLeadsFolder,
+          leadsFolderName: (leadsFolderUrl ? leadsFolderName : existing.leadsFolderName) || leadsFolderName,
+          prFolderUrl: prFolderUrl || existing.prFolderUrl,
+          prFileUrl: prFileUrl || existing.prFileUrl,
+        };
       }
     } else {
       dealsMap[custKey] = item;

@@ -473,9 +473,15 @@ export async function getOrCreateFinanceLeadFolder(
   const cleanCust = customerName.replace(/[^a-zA-Z0-9 _-]/g, '').trim();
   const targetFolderName = (moCode ? `${moCode} - ` : '') + cleanCust;
 
-  // Cek apakah sudah ada (cari berdasarkan nama nasabah atau kode MO)
-  const searchPart = moCode ? moCode.trim() : cleanCust;
-  const found = await findFolderInParent(rootId, searchPart);
+  // Cek apakah sudah ada (cari berdasarkan kode MO, lalu nama nasabah)
+  let found = null;
+  if (moCode) {
+    found = await findFolderInParent(rootId, moCode.trim());
+  }
+  if (!found && cleanCust) {
+    found = await findFolderInParent(rootId, cleanCust);
+  }
+
   if (found) {
     return {
       id: found.id,
