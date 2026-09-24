@@ -70,6 +70,26 @@ export async function POST(req: NextRequest) {
               const leadsFolder = await getOrCreateFinanceLeadFolder(deal.moCode || '', deal.customerName);
               leadsFolderUrl = leadsFolder.url;
               await updateRowLeadsFolderInController(deal.row, leadsFolder.url, leadsFolder.name);
+
+              // Tarik SPA dan Email Bank dari Gmail via Apps Script
+              if (KPR_CONFIG.APPS_SCRIPT_WEBAPP_URL) {
+                try {
+                  await fetch(KPR_CONFIG.APPS_SCRIPT_WEBAPP_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      action: 'fetch_spa_and_email',
+                      folderId: leadsFolder.id,
+                      customerName: deal.customerName,
+                      bankName: deal.bank || '',
+                      moCode: deal.moCode || ''
+                    }),
+                    redirect: 'follow'
+                  });
+                } catch (gasErr: any) {
+                  console.warn(`Gagal fetch Gmail untuk ${deal.customerName}:`, gasErr.message);
+                }
+              }
             } catch (e) {
               console.warn(`Peringatan: Gagal membuat leads folder untuk ${deal.customerName}:`, e);
             }

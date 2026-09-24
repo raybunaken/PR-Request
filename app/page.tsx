@@ -25,7 +25,11 @@ import {
   FolderPlus,
   FolderCheck,
   FileCheck2,
-  FolderOpen
+  FolderOpen,
+  Download,
+  Mail,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 interface DealItem {
@@ -106,15 +110,23 @@ export default function DashboardPage() {
 
   // Progress state for Leads Folder Action
   const [isProcessingLeads, setIsProcessingLeads] = useState<boolean>(false);
+  const [retryingCustomer, setRetryingCustomer] = useState<string | null>(null);
+  const [expandedRetryItem, setExpandedRetryItem] = useState<string | null>(null);
+  const [manualKeywords, setManualKeywords] = useState<Record<string, string>>({});
   const [leadsModalData, setLeadsModalData] = useState<{
     isOpen: boolean;
     title: string;
     items: Array<{
       customerName: string;
+      moCode?: string;
+      bankName?: string;
+      row?: number;
       folderName: string;
       folderUrl: string;
       hasSpa: boolean;
       hasBankEmail: boolean;
+      spaFile?: { id: string; name: string; url: string };
+      bankEmailFile?: { id: string; name: string; url: string };
       isNew: boolean;
     }>;
   }>({
@@ -381,8 +393,8 @@ export default function DashboardPage() {
     }
   };
 
-  // Single Leads Folder Create/Sync
-  const handleCreateLeadsFolderSingle = async (deal: DealItem) => {
+  // Single Leads Folder Create / Fetch Gmail
+  const handleCreateLeadsFolderSingle = async (deal: DealItem, fetchGmail: boolean = true) => {
     setIsProcessingLeads(true);
     try {
       const res = await fetch('/api/leads-folder', {
@@ -393,7 +405,8 @@ export default function DashboardPage() {
           dbRow: deal.dbRow,
           customerName: deal.customerName,
           moCode: deal.moCode,
-          bankName: deal.bank
+          bankName: deal.bank,
+          fetchFromGmail: fetchGmail
         })
       });
       const data = await res.json();
@@ -401,19 +414,24 @@ export default function DashboardPage() {
         const itemRes = data.results[0];
         setLeadsModalData({
           isOpen: true,
-          title: 'Folder Leads Finance Berhasil Dibuat',
+          title: fetchGmail ? 'Tarik SPA & Email Bank Selesai' : 'Folder Leads Finance Berhasil Dibuat',
           items: [{
             customerName: deal.customerName,
+            moCode: deal.moCode,
+            bankName: deal.bank,
+            row: deal.row,
             folderName: itemRes.folder?.name || deal.customerName,
             folderUrl: itemRes.folder?.url || '',
             hasSpa: !!itemRes.fileCheck?.hasSpa,
             hasBankEmail: !!itemRes.fileCheck?.hasBankEmail,
+            spaFile: itemRes.fileCheck?.spaFile,
+            bankEmailFile: itemRes.fileCheck?.bankEmailFile,
             isNew: !!itemRes.folder?.isNew
           }]
         });
         fetchDeals(activeTab);
       } else {
-        alert(data.error || 'Gagal membuat Folder Leads.');
+        alert(data.error || 'Gagal memproses berkas leads.');
       }
     } catch (err: any) {
       alert(err.message || 'Terjadi kesalahan koneksi.');
@@ -422,8 +440,8 @@ export default function DashboardPage() {
     }
   };
 
-  // Batch Leads Folder Create/Sync
-  const handleCreateLeadsFolderBatch = async () => {
+  // Batch Leads Folder Create / Fetch Gmail
+  const handleCreateLeadsFolderBatch = async (fetchGmail: boolean = true) => {
     const toProcess = deals.filter(d => selectedRows.has(d.row));
     if (toProcess.length === 0) return;
 
@@ -434,27 +452,38 @@ export default function DashboardPage() {
         dbRow: d.dbRow,
         customerName: d.customerName,
         moCode: d.moCode,
-        bankName: d.bank
+        bankName: d.bank,
+        fetchFromGmail: fetchGmail
       }));
 
       const res = await fetch('/api/leads-folder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items })
+        body: JSON.stringify({ items, fetchFromGmail: fetchGmail })
       });
       const data = await res.json();
       if (data.success && data.results && data.results.length > 0) {
         setLeadsModalData({
           isOpen: true,
-          title: `Batch Folder Leads Selesai (${data.results.length} Folder)`,
-          items: data.results.map((r: any) => ({
-            customerName: r.customerName,
-            folderName: r.folder?.name || r.customerName,
-            folderUrl: r.folder?.url || '',
-            hasSpa: !!r.fileCheck?.hasSpa,
-            hasBankEmail: !!r.fileCheck?.hasBankEmail,
-            isNew: !!r.folder?.isNew
-          }))
+          title: fetchGmail 
+            ? `Tarik Berkas Selesai (${data.results.length} Nasabah)`
+            : `Batch Folder Leads Selesai (${data.results.length} Folder)`,
+          items: data.results.map((r: any) => {
+            const matchedDeal = toProcess.find(d => d.customerName === r.customerName);
+            return {
+              customerName: r.customerName,
+              moCode: matchedDeal?.moCode || '',
+              bankName: matchedDeal?.bank || '',
+              row: r.row,
+              folderName: r.folder?.name || r.customerName,
+              folderUrl: r.folder?.url || '',
+              hasSpa: !!r.fileCheck?.hasSpa,
+              hasBankEmail: !!r.fileCheck?.hasBankEmail,
+              spaFile: r.fileCheck?.spaFile,
+              bankEmailFile: r.fileCheck?.bankEmailFile,
+              isNew: !!r.folder?.isNew
+            };
+          })
         });
         fetchDeals(activeTab);
       } else {
@@ -464,6 +493,49 @@ export default function DashboardPage() {
       alert(err.message || 'Terjadi kesalahan koneksi.');
     } finally {
       setIsProcessingLeads(false);
+    }
+  };
+
+  // Retry search dengan custom keyword jika ada perbedaan nama nasabah di email
+  const handleRetrySearchForCustomer = async (item: any) => {
+    const customKeyword = (manualKeywords[item.customerName] || '').trim();
+    setRetryingCustomer(item.customerName);
+    try {
+      const res = await fetch('/api/leads-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          row: item.row,
+          customerName: item.customerName,
+          moCode: item.moCode,
+          bankName: item.bankName,
+          fetchFromGmail: true,
+          customSpaQuery: customKeyword ? `"SPA" "${customKeyword}" has:attachment` : '',
+          customBankQuery: customKeyword ? `"Konfirmasi" "${customKeyword}"` : ''
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.results && data.results.length > 0) {
+        const updated = data.results[0];
+        setLeadsModalData(prev => ({
+          ...prev,
+          items: prev.items.map(it => it.customerName === item.customerName ? {
+            ...it,
+            folderName: updated.folder?.name || it.folderName,
+            folderUrl: updated.folder?.url || it.folderUrl,
+            hasSpa: !!updated.fileCheck?.hasSpa,
+            hasBankEmail: !!updated.fileCheck?.hasBankEmail,
+            spaFile: updated.fileCheck?.spaFile,
+            bankEmailFile: updated.fileCheck?.bankEmailFile,
+          } : it)
+        }));
+      } else {
+        alert(data.error || 'Pencarian ulang tidak menghasilkan dokumen.');
+      }
+    } catch (err: any) {
+      alert('Gagal mencari ulang: ' + (err.message || 'Koneksi error'));
+    } finally {
+      setRetryingCustomer(null);
     }
   };
 
@@ -1150,16 +1222,20 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <span className="text-xs text-slate-500">
-                    Folder Induk: <b>Leads Akad Automation</b> di Google Drive
+                  <span className="text-xs text-slate-500 hidden sm:inline">
+                    Folder Induk: <b>Leads Akad Automation</b> di Drive
                   </span>
                   <button
-                    onClick={handleCreateLeadsFolderBatch}
+                    onClick={() => handleCreateLeadsFolderBatch(true)}
                     disabled={selectedRows.size === 0 || isProcessingLeads}
                     className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
                   >
-                    <FolderPlus className="w-3.5 h-3.5" />
-                    <span>Buat Folder untuk Terpilih ({selectedRows.size})</span>
+                    {isProcessingLeads ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Mail className="w-3.5 h-3.5" />
+                    )}
+                    <span>Tarik SPA &amp; Email Bank ({selectedRows.size})</span>
                   </button>
                 </div>
               </div>
@@ -1278,23 +1354,36 @@ export default function DashboardPage() {
                             <td className="py-3 px-4 text-center">
                               <div className="flex items-center justify-center gap-1.5">
                                 {deal.leadsFolderUrl ? (
-                                  <a
-                                    href={deal.leadsFolderUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
-                                  >
-                                    <FolderOpen className="w-3 h-3" />
-                                    <span>Buka Drive</span>
-                                  </a>
+                                  <>
+                                    <a
+                                      href={deal.leadsFolderUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+                                      title="Buka Folder di Drive"
+                                    >
+                                      <FolderOpen className="w-3 h-3 text-slate-500" />
+                                      <span>Buka</span>
+                                    </a>
+                                    <button
+                                      onClick={() => handleCreateLeadsFolderSingle(deal, true)}
+                                      disabled={isProcessingLeads}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-indigo-600 text-white hover:bg-indigo-700 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                                      title="Tarik SPA & Email Bank dari Gmail Dzaky"
+                                    >
+                                      <Mail className="w-3 h-3" />
+                                      <span>Tarik Berkas</span>
+                                    </button>
+                                  </>
                                 ) : (
                                   <button
-                                    onClick={() => handleCreateLeadsFolderSingle(deal)}
+                                    onClick={() => handleCreateLeadsFolderSingle(deal, true)}
                                     disabled={isProcessingLeads}
-                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors cursor-pointer"
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors cursor-pointer disabled:opacity-50"
+                                    title="Buat folder di Drive dan tarik berkas dari Gmail"
                                   >
                                     <FolderPlus className="w-3 h-3" />
-                                    <span>Buat Folder</span>
+                                    <span>Buat &amp; Tarik Berkas</span>
                                   </button>
                                 )}
                               </div>
@@ -1474,64 +1563,169 @@ export default function DashboardPage() {
             <div className="py-4 space-y-4">
               <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 leading-relaxed">
                 <p className="font-semibold">
-                  Folder di Google Drive (Leads Akad Automation) telah berhasil dibuat dan terhubung.
+                  Folder Google Drive (Leads Akad Automation) telah disinkronkan.
                 </p>
                 <p className="text-emerald-700 mt-1">
-                  Folder ini adalah tempat penampungan berkas persetujuan pembiayaan dari bank (SPA / SP3K) dan Konfirmasi Plafond Bank untuk kelengkapan audit Finance.
+                  Berkas SPA Signed dari Dropbox Sign dan PDF Arsip Konfirmasi Plafond Bank ditarik langsung dari kotak masuk Gmail (dzaky.rayssa@99.co).
                 </p>
               </div>
 
-              <div className="max-h-72 overflow-y-auto space-y-2.5 border border-slate-100 rounded-xl p-3 bg-slate-50/50">
-                {leadsModalData.items.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 rounded-lg bg-white border border-slate-200/80 shadow-2xs space-y-2"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-xs text-slate-900 truncate">
-                        {item.folderName}
-                      </span>
-                      {item.folderUrl && (
-                        <a
-                          href={item.folderUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors shrink-0"
-                        >
-                          <FolderOpen className="w-3.5 h-3.5" />
-                          <span>Buka di Drive</span>
-                          <ExternalLink className="w-3 h-3 ml-0.5 opacity-80" />
-                        </a>
+              <div className="max-h-96 overflow-y-auto space-y-3 border border-slate-100 rounded-xl p-3 bg-slate-50/50">
+                {leadsModalData.items.map((item, idx) => {
+                  const isRetrying = retryingCustomer === item.customerName;
+                  const isExpanded = expandedRetryItem === item.customerName;
+                  const hasMissingDoc = !item.hasSpa || !item.hasBankEmail;
+
+                  return (
+                    <div
+                      key={idx}
+                      className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-xs text-slate-900">
+                              {item.customerName}
+                            </span>
+                            {item.moCode && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-700">
+                                {item.moCode}
+                              </span>
+                            )}
+                            {item.bankName && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-100">
+                                {item.bankName}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5 truncate max-w-xs">
+                            Folder: {item.folderName}
+                          </div>
+                        </div>
+
+                        {item.folderUrl && (
+                          <a
+                            href={item.folderUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors shrink-0"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5" />
+                            <span>Buka Folder</span>
+                            <ExternalLink className="w-3 h-3 ml-0.5 opacity-80" />
+                          </a>
+                        )}
+                      </div>
+
+                      {/* Document Status Rows */}
+                      <div className="space-y-2 pt-2 border-t border-slate-100 text-xs">
+                        {/* SPA Document */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            {item.hasSpa ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <Check className="w-3 h-3 text-emerald-600" />
+                                <span>SPA Signed Tersimpan</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium text-[11px] bg-amber-50 text-amber-700 border border-amber-200">
+                                <Clock className="w-3 h-3 text-amber-600" />
+                                <span>SPA Belum Ditemukan di Gmail</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {item.spaFile?.url && (
+                            <a
+                              href={item.spaFile.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded-md transition-colors"
+                            >
+                              <FileText className="w-3 h-3" />
+                              <span>Lihat SPA PDF</span>
+                              <ExternalLink className="w-2.5 h-2.5 opacity-70" />
+                            </a>
+                          )}
+                        </div>
+
+                        {/* Bank Confirmation Email Document */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            {item.hasBankEmail ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <Check className="w-3 h-3 text-emerald-600" />
+                                <span>PDF Email Konfirmasi Bank Tersimpan</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium text-[11px] bg-amber-50 text-amber-700 border border-amber-200">
+                                <Clock className="w-3 h-3 text-amber-600" />
+                                <span>Email Bank Belum Ditemukan di Gmail</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {item.bankEmailFile?.url && (
+                            <a
+                              href={item.bankEmailFile.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-700 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-md transition-colors"
+                            >
+                              <FileText className="w-3 h-3" />
+                              <span>Lihat Email PDF</span>
+                              <ExternalLink className="w-2.5 h-2.5 opacity-70" />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Manual Search Accordion for Case 1 / Typos */}
+                      {hasMissingDoc && (
+                        <div className="pt-2 border-t border-slate-100">
+                          <button
+                            onClick={() => setExpandedRetryItem(isExpanded ? null : item.customerName)}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-800 cursor-pointer"
+                          >
+                            <span>Coba Cari Ulang dengan Kata Kunci Khusus / Nama Lain</span>
+                            {isExpanded ? (
+                              <ChevronUp className="w-3 h-3" />
+                            ) : (
+                              <ChevronDown className="w-3 h-3" />
+                            )}
+                          </button>
+
+                          {isExpanded && (
+                            <div className="mt-2 p-2.5 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
+                              <p className="text-[11px] text-slate-600">
+                                Jika nama nasabah di email sedikit berbeda atau disingkat:
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  placeholder="Contoh: nama nasabah tanpa PT, nama PIC, dll"
+                                  value={manualKeywords[item.customerName] || ''}
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    setManualKeywords(prev => ({ ...prev, [item.customerName]: val }));
+                                  }}
+                                  className="flex-1 px-2.5 py-1 text-xs bg-white border border-slate-300 rounded-md focus:outline-hidden focus:border-indigo-500"
+                                />
+                                <button
+                                  onClick={() => handleRetrySearchForCustomer(item)}
+                                  disabled={isRetrying}
+                                  className="px-3 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition-colors disabled:opacity-50 cursor-pointer shrink-0"
+                                >
+                                  {isRetrying ? 'Mencari...' : 'Cari Ulang'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
-
-                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100 text-[11px]">
-                      <span className="text-slate-500 font-medium">Status Berkas Bank:</span>
-                      {item.hasSpa ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          <Check className="w-3 h-3 text-emerald-600" />
-                          SPA Ada
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium bg-amber-50 text-amber-700 border border-amber-200">
-                          <Clock className="w-3 h-3 text-amber-600" />
-                          SPA Belum Diunggah
-                        </span>
-                      )}
-
-                      {item.hasBankEmail ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          <Check className="w-3 h-3 text-emerald-600" />
-                          Konfirmasi Bank Ada
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium bg-slate-100 text-slate-600">
-                          Konfirmasi Bank Belum Diunggah
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
