@@ -220,15 +220,12 @@ function fetchSpaSignedAttachment(targetFolder, customerName, bankName, customQu
 
   var targetFileName = 'SPA_' + customerName.replace(/[/\\?%*:|"<>]/g, '').trim() + '.pdf';
 
+  // Hapus berkas lama jika ada untuk mencegah korupsi file binary dan mencegah duplikasi
   var existingFiles = targetFolder.getFilesByName(targetFileName);
-  var driveFile;
-  if (existingFiles.hasNext()) {
-    var existing = existingFiles.next();
-    existing.setContent(matchedAttachment.copyBlob().getBytes());
-    driveFile = existing;
-  } else {
-    driveFile = targetFolder.createFile(matchedAttachment.copyBlob().setName(targetFileName));
+  while (existingFiles.hasNext()) {
+    existingFiles.next().setTrashed(true);
   }
+  var driveFile = targetFolder.createFile(matchedAttachment.copyBlob().setName(targetFileName));
 
   return {
     found: true,
@@ -404,15 +401,12 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
   var htmlBlob = Utilities.newBlob(html, 'text/html', 'email_thread.html');
   var pdfBlob = htmlBlob.getAs('application/pdf').setName(targetFileName);
 
+  // Hapus berkas lama jika ada untuk mencegah korupsi file binary dan mencegah duplikasi
   var existingFiles = targetFolder.getFilesByName(targetFileName);
-  var driveFile;
-  if (existingFiles.hasNext()) {
-    var existing = existingFiles.next();
-    existing.setContent(pdfBlob.getBytes());
-    driveFile = existing;
-  } else {
-    driveFile = targetFolder.createFile(pdfBlob);
+  while (existingFiles.hasNext()) {
+    existingFiles.next().setTrashed(true);
   }
+  var driveFile = targetFolder.createFile(pdfBlob);
 
   return {
     found: true,
