@@ -5,8 +5,8 @@
  * Fitur:
  * 1. Otomasi penarikan file SPA (Surat Perjanjian Kerjasama) final signed dari Gmail (Dropbox Sign / 99 Group)
  *    dan penyimpanan otomatis ke folder Leads di Google Drive.
- * 2. Otomasi pencarian thread email Konfirmasi Plafond Bank, konversi thread email menjadi PDF resmi,
- *    dan penyimpanan otomatis ke folder Leads di Google Drive.
+ * 2. Otomasi pencarian thread email Konfirmasi Plafond Bank, konversi thread email menjadi PDF persis format
+ *    cetak native Gmail (Gmail Print to PDF) dengan logo 99 Group resmi.
  * 3. Fallback pencarian cerdas berbasis token/nama nasabah untuk mengantisipasi perbedaan ejaan nama (Case 1).
  */
 
@@ -45,7 +45,6 @@ function doPost(e) {
         payload.customBankQuery
       );
     } else if (payload.row) {
-      // Handler legacy untuk pemrosesan baris PR
       responseData = {
         success: true,
         message: 'Row ' + payload.row + ' diterima via Apps Script.',
@@ -95,7 +94,7 @@ function executeFetchSpaAndBankEmail(folderId, customerName, bankName, moCode, c
   // 1. Ambil SPA Signed Attachment
   var spaResult = fetchSpaSignedAttachment(targetFolder, custClean, bankClean, customSpaQuery);
 
-  // 2. Ambil Email Konfirmasi Bank & Render ke PDF
+  // 2. Ambil Email Konfirmasi Bank & Render ke PDF (Persis format cetak Gmail asli)
   var bankEmailResult = fetchBankEmailAndExportPdf(targetFolder, custClean, bankClean, moClean, customBankQuery);
 
   return {
@@ -131,7 +130,7 @@ function fetchSpaSignedAttachment(targetFolder, customerName, bankName, customQu
   queries.push('"SPA" "signed" "' + cleanNameOnly + '" "' + bankWord + '" has:attachment');
   queries.push('"SPA" "signed" "' + cleanNameOnly + '" has:attachment');
 
-  // Tier 2: Token kata signifikan (Case 1: variasi nama atau singkatan)
+  // Tier 2: Token kata signifikan
   if (words.length >= 2) {
     queries.push('"SPA" "signed" "' + words[0] + '" "' + words[1] + '" "' + bankWord + '" has:attachment');
     queries.push('"SPA" "signed" "' + words[0] + '" "' + words[1] + '" has:attachment');
@@ -187,7 +186,6 @@ function fetchSpaSignedAttachment(targetFolder, customerName, bankName, customQu
 
             if (isPdf) {
               if (isSigned || hasSpaInSub || attLower.indexOf('spa') !== -1) {
-                // Verifikasi kemiripan dengan token nasabah
                 var matchesToken = words.length === 0 || words.some(function(w) {
                   return subLower.indexOf(w.toLowerCase()) !== -1 || attLower.indexOf(w.toLowerCase()) !== -1;
                 });
@@ -220,10 +218,8 @@ function fetchSpaSignedAttachment(targetFolder, customerName, bankName, customQu
     };
   }
 
-  // Nama file target standar di Google Drive
   var targetFileName = 'SPA_' + customerName.replace(/[/\\?%*:|"<>]/g, '').trim() + '.pdf';
 
-  // Periksa apakah file sudah ada di folder untuk mencegah duplikasi
   var existingFiles = targetFolder.getFilesByName(targetFileName);
   var driveFile;
   if (existingFiles.hasNext()) {
@@ -247,7 +243,7 @@ function fetchSpaSignedAttachment(targetFolder, customerName, bankName, customQu
 }
 
 /**
- * Cari thread email konfirmasi bank, render ke dokumen PDF dan simpan ke Google Drive
+ * Cari thread email konfirmasi bank, render ke dokumen PDF persis seperti tampilan cetak native Gmail (Gmail Print to PDF)
  */
 function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode, customQuery) {
   var cleanNameOnly = customerName.replace(/[^a-zA-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -332,56 +328,80 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
 
   var messages = matchedThread.getMessages();
   var threadSubject = matchedThread.getFirstMessageSubject() || 'Konfirmasi Plafond Akad Bank';
+  var userEmail = Session.getActiveUser().getEmail() || 'dzaky.rayssa@99.co';
 
-  // Format thread email menjadi dokumen HTML bersih
-  var htmlContent = '<!DOCTYPE html><html><head><meta charset="utf-8">';
-  htmlContent += '<style>';
-  htmlContent += 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; color: #1e293b; margin: 25px; line-height: 1.5; font-size: 13px; }';
-  htmlContent += '.doc-header { border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 20px; }';
-  htmlContent += '.doc-title { font-size: 17px; font-weight: bold; color: #0f172a; margin: 0 0 6px 0; }';
-  htmlContent += '.meta-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }';
-  htmlContent += '.meta-table td { padding: 4px 6px; }';
-  htmlContent += '.meta-label { font-weight: 600; color: #64748b; width: 130px; }';
-  htmlContent += '.msg-box { border: 1px solid #cbd5e1; border-radius: 8px; margin-bottom: 18px; background: #ffffff; overflow: hidden; page-break-inside: avoid; }';
-  htmlContent += '.msg-header { background: #f8fafc; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-size: 12px; }';
-  htmlContent += '.msg-header div { margin-bottom: 3px; }';
-  htmlContent += '.msg-body { padding: 14px; font-size: 13px; color: #334155; }';
-  htmlContent += '.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: #dbeafe; color: #1e40af; }';
-  htmlContent += '.footer { font-size: 10px; color: #94a3b8; text-align: center; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 8px; }';
-  htmlContent += '</style></head><body>';
+  // Format HTML persis layout native Gmail Print / Save as PDF
+  var html = '<!DOCTYPE html><html><head><meta charset="utf-8">';
+  html += '<style>';
+  html += '@page { margin: 25px 35px 25px 35px; }';
+  html += 'body { font-family: Roboto, Arial, Helvetica, sans-serif; color: #222222; font-size: 13px; line-height: 1.45; margin: 0; padding: 0; }';
+  html += '.header-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }';
+  html += '.logo-text { font-family: Arial, sans-serif; font-size: 22px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px; }';
+  html += '.logo-sub { font-size: 14px; font-weight: 700; color: #0f172a; letter-spacing: 1.5px; margin-left: 2px; }';
+  html += '.header-meta { text-align: right; font-size: 11px; color: #444; line-height: 1.4; vertical-align: top; }';
+  html += '.subject-title { font-size: 19px; font-weight: bold; color: #202124; margin: 0 0 4px 0; line-height: 1.3; }';
+  html += '.message-count { font-size: 12px; color: #5f6368; margin-bottom: 14px; }';
+  html += '.main-divider { border: none; border-top: 1px solid #dadce0; margin: 0 0 20px 0; }';
+  html += '.msg-item { margin-bottom: 22px; page-break-inside: avoid; }';
+  html += '.msg-item-divider { border: none; border-top: 1px solid #e0e0e0; margin: 24px 0; }';
+  html += '.msg-meta-table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }';
+  html += '.msg-sender { font-size: 13px; color: #202124; }';
+  html += '.msg-date { font-size: 11px; color: #5f6368; text-align: right; white-space: nowrap; vertical-align: top; }';
+  html += '.msg-recipient { font-size: 12px; color: #5f6368; margin-bottom: 2px; }';
+  html += '.msg-body { font-size: 13px; color: #202124; line-height: 1.5; margin-top: 12px; }';
+  html += '.msg-body a { color: #1a73e8; text-decoration: underline; }';
+  html += '.msg-body p { margin: 0 0 10px 0; }';
+  html += '</style></head><body>';
 
-  htmlContent += '<div class="doc-header">';
-  htmlContent += '<div class="doc-title">ARSIP EMAIL KONFIRMASI PLAFOND AKAD BANK</div>';
-  htmlContent += '<table class="meta-table">';
-  htmlContent += '<tr><td class="meta-label">Nasabah Debitur:</td><td><b>' + escapeHtml(customerName) + '</b></td>';
-  htmlContent += '<td class="meta-label">Bank Rekanan:</td><td><b>' + escapeHtml(bankName || '-') + '</b></td></tr>';
-  htmlContent += '<tr><td class="meta-label">Kode #MO:</td><td><b>' + escapeHtml(moCode || '-') + '</b></td>';
-  htmlContent += '<td class="meta-label">Waktu Export:</td><td>' + new Date().toLocaleString('id-ID') + '</td></tr>';
-  htmlContent += '<tr><td class="meta-label">Subjek Email:</td><td colspan="3"><b>' + escapeHtml(threadSubject) + '</b></td></tr>';
-  htmlContent += '</table></div>';
+  // 1. Top Header (Logo 99 GROUP di kiri, Mail info di kanan)
+  html += '<table class="header-table"><tr>';
+  html += '<td style="vertical-align: top;">';
+  html += '<span class="logo-text">99</span><span class="logo-sub"> GROUP</span>';
+  html += '</td>';
+  html += '<td class="header-meta">';
+  html += '<b>99.co Mail - ' + escapeHtml(threadSubject) + '</b><br/>';
+  html += 'Dzaky Rayssa Buntoro &lt;' + escapeHtml(userEmail) + '&gt;';
+  html += '</td></tr></table>';
 
+  // 2. Thread Title & Message Count
+  html += '<div class="subject-title">' + escapeHtml(threadSubject) + '</div>';
+  html += '<div class="message-count">' + messages.length + ' messages</div>';
+  html += '<hr class="main-divider" />';
+
+  // 3. Messages List
   for (var mIdx = 0; mIdx < messages.length; mIdx++) {
     var curMsg = messages[mIdx];
-    var fromStr = curMsg.getFrom();
-    var toStr = curMsg.getTo();
-    var dateStr = curMsg.getDate().toLocaleString('id-ID');
-    var rawBody = curMsg.getBody();
+    var fromStr = curMsg.getFrom() || '';
+    var toStr = curMsg.getTo() || '';
+    var ccStr = curMsg.getCc() || '';
+    var dateFormatted = Utilities.formatDate(curMsg.getDate(), "GMT+7", "EEE, MMM d, yyyy 'at' h:mm a");
+    var bodyHtml = curMsg.getBody() || '';
 
-    htmlContent += '<div class="msg-box">';
-    htmlContent += '<div class="msg-header">';
-    htmlContent += '<div><span class="badge">Pesan #' + (mIdx + 1) + '</span> &nbsp; <b>Dari:</b> ' + escapeHtml(fromStr) + '</div>';
-    htmlContent += '<div><b>Kepada:</b> ' + escapeHtml(toStr) + '</div>';
-    htmlContent += '<div><b>Waktu:</b> ' + dateStr + '</div>';
-    htmlContent += '</div>';
-    htmlContent += '<div class="msg-body">' + rawBody + '</div>';
-    htmlContent += '</div>';
+    html += '<div class="msg-item">';
+    html += '<table class="msg-meta-table"><tr>';
+    html += '<td class="msg-sender">' + formatSenderHeader(fromStr) + '</td>';
+    html += '<td class="msg-date">' + dateFormatted + '</td>';
+    html += '</tr></table>';
+
+    if (toStr) {
+      html += '<div class="msg-recipient">To: ' + escapeHtml(toStr) + '</div>';
+    }
+    if (ccStr) {
+      html += '<div class="msg-recipient">Cc: ' + escapeHtml(ccStr) + '</div>';
+    }
+
+    html += '<div class="msg-body">' + bodyHtml + '</div>';
+    html += '</div>';
+
+    if (mIdx < messages.length - 1) {
+      html += '<hr class="msg-item-divider" />';
+    }
   }
 
-  htmlContent += '<div class="footer">Dokumen ini diexport secara otomatis dari kotak masuk Gmail resmi (dzaky.rayssa@99.co) untuk kelengkapan audit Finance.</div>';
-  htmlContent += '</body></html>';
+  html += '</body></html>';
 
   var targetFileName = 'Konfirmasi Plafond - ' + bankWord + ' - ' + customerName.replace(/[/\\?%*:|"<>]/g, '').trim() + '.pdf';
-  var htmlBlob = Utilities.newBlob(htmlContent, 'text/html', 'email_thread.html');
+  var htmlBlob = Utilities.newBlob(html, 'text/html', 'email_thread.html');
   var pdfBlob = htmlBlob.getAs('application/pdf').setName(targetFileName);
 
   var existingFiles = targetFolder.getFilesByName(targetFileName);
@@ -403,6 +423,17 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
     messageCount: messages.length,
     queryUsed: queryUsed
   };
+}
+
+function formatSenderHeader(fromStr) {
+  if (!fromStr) return '';
+  var match = fromStr.match(/^(.*?)\s*<(.+?)>$/);
+  if (match) {
+    var name = match[1].replace(/^["']|["']$/g, '').trim();
+    var email = match[2].trim();
+    return '<b>' + escapeHtml(name || email) + '</b> &lt;' + escapeHtml(email) + '&gt;';
+  }
+  return '<b>' + escapeHtml(fromStr) + '</b>';
 }
 
 function escapeHtml(text) {
