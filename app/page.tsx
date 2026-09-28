@@ -29,8 +29,11 @@ import {
   Download,
   Mail,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Compass
 } from 'lucide-react';
+import Link from 'next/link';
+import AppSwitcher from '@/components/AppSwitcher';
 
 interface DealItem {
   row: number;
@@ -563,7 +566,19 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            {/* KPR Ops Suite Switcher */}
+            <AppSwitcher currentApp="pr" />
+
+            {/* Link to Launchpad Portal */}
+            <Link
+              href="/portal"
+              className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors border border-slate-200"
+            >
+              <Compass className="w-3.5 h-3.5 text-blue-600" />
+              <span>Portal Ops</span>
+            </Link>
+
             {/* Drive Connection Status Pill */}
             {driveStatus.checked && (
               driveStatus.connected ? (
