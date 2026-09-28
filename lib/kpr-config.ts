@@ -160,7 +160,16 @@ export function resolveR123BankAccount(bankName: string, entityCode: 'NND' | 'WM
 export function parseNumberClean(val: any): number {
   if (typeof val === 'number') return isNaN(val) ? 0 : Math.round(val);
   if (!val) return 0;
-  const cleanStr = String(val).replace(/[^0-9.-]/g, '');
+  let str = String(val).trim();
+  if (str.includes('.') && str.includes(',')) {
+    str = str.replace(/\./g, '').replace(',', '.');
+  } else if (str.includes('.')) {
+    const parts = str.split('.');
+    if (parts.length > 2 || (parts.length === 2 && parts[1].length === 3)) {
+      str = str.replace(/\./g, '');
+    }
+  }
+  const cleanStr = str.replace(/[^0-9.-]/g, '');
   const n = parseFloat(cleanStr);
   return isNaN(n) ? 0 : Math.round(n);
 }

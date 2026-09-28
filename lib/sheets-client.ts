@@ -90,17 +90,159 @@ export async function getSheetsService() {
   return google.sheets({ version: 'v4', auth });
 }
 
+/**
+ * Otomatis sinkronkan transaksi baru dari Database Utama (All - Akad Transaction) ke Controller Sheet jika ada baris baru
+ */
+async function autoSyncControllerFromAkad(
+  sheets: any,
+  ctrlRows: any[][],
+  dbRows: any[][]
+): Promise<any[][]> {
+  try {
+    let maxCtrlDbRow = 0;
+    const existingCtrlMap: Record<string, { leadsFolder: string; statusPr: string }> = {};
+
+    for (const r of ctrlRows) {
+      const dbRow = parseInt(String(r[0] || '0'), 10);
+      if (dbRow > maxCtrlDbRow) maxCtrlDbRow = dbRow;
+      const cust = String(r[1] || '').trim();
+      if (cust) {
+        existingCtrlMap[normalizeName(cust)] = {
+          leadsFolder: String(r[9] || ''),
+          statusPr: String(r[10] || '')
+        };
+      }
+    }
+
+    let maxAkadDbRow = 0;
+    for (let i = dbRows.length - 1; i >= 1; i--) {
+      const cust = String(dbRows[i][1] || '').trim();
+      if (cust) {
+        maxAkadDbRow = i + 1;
+        break;
+      }
+    }
+
+    if (maxAkadDbRow <= maxCtrlDbRow) {
+      return ctrlRows;
+    }
+
+    console.log(`[Auto-Sync] Ditemukan transaksi baru di Akad (dbRow ${maxAkadDbRow} > max Controller ${maxCtrlDbRow}). Memperbarui Controller Sheet...`);
+
+    let riwayatMap: Record<string, string> = {};
+    try {
+      const riwayatRes = await sheets.spreadsheets.values.get({
+        spreadsheetId: KPR_CONFIG.CONTROLLER_SPREADSHEET_ID,
+        range: "'Riwayat PR Generated'!A2:F100"
+      });
+      const riwayatRows = riwayatRes.data.values || [];
+      for (const r of riwayatRows) {
+        const cust = String(r[1] || '').trim();
+        const link = String(r[5] || '').trim();
+        if (cust && link) {
+          riwayatMap[normalizeName(cust)] = link;
+        }
+      }
+    } catch (e: any) {
+      console.warn('[Auto-Sync] Peringatan: Gagal membaca Riwayat PR Generated:', e.message);
+    }
+
+    const newRows: any[][] = [];
+    for (let i = dbRows.length - 1; i >= 1; i--) {
+      const r = dbRows[i];
+      const custName = String(r[1] || '').trim();
+      if (!custName) continue;
+
+      const dbRow = i + 1;
+      const tglAkad = r[4] || '';
+      const bank = String(r[5] || '').trim();
+      const grouping = String(r[7] || '').trim();
+      const pctRaw = String(r[17] || '').trim();
+      const statusBank = String(r[13] || '').trim();
+      const isDirect = grouping.toLowerCase().includes('direct') || !pctRaw || pctRaw === '0%';
+
+      const commCalc = calculateSmartCommission(r);
+      const commAmount = isDirect ? 0 : commCalc.amount;
+      const agent = resolveAgent(pctRaw);
+      const agentName = isDirect ? 'Direct Customer' : agent.name;
+      const company = getCompanyByBank(bank);
+      const displayStatusBank = statusBank ? statusBank : 'Belum Lunas (Estimasi)';
+
+      const key = normalizeName(custName);
+      const existing = existingCtrlMap[key] || { leadsFolder: '', statusPr: '' };
+      const riwayatLink = riwayatMap[key] || '';
+
+      let leadsFolderVal = existing.leadsFolder || '';
+      if (!leadsFolderVal && r[23]) {
+        const dbLf = String(r[23]).trim();
+        if (dbLf.startsWith('http')) {
+          leadsFolderVal = `=HYPERLINK("${dbLf}", "Buka Folder")`;
+        } else {
+          leadsFolderVal = dbLf;
+        }
+      }
+
+      let statusPrVal = existing.statusPr || '';
+      if (!statusPrVal) {
+        if (isDirect) {
+          statusPrVal = 'Direct (Tanpa Agen)';
+        } else if (riwayatLink) {
+          statusPrVal = `=HYPERLINK("${riwayatLink}", "Sudah Ada PR")`;
+        } else {
+          statusPrVal = 'Belum Dibuat';
+        }
+      }
+
+      let formattedPct = '0%';
+      if (!isDirect && pctRaw) {
+        let pNum = parseFloat(String(pctRaw).replace('%', ''));
+        if (pNum > 0 && pNum <= 1) pNum = Math.round(pNum * 100);
+        formattedPct = `${Math.round(pNum)}%`;
+      }
+
+      newRows.push([
+        dbRow,
+        custName,
+        tglAkad,
+        bank,
+        formattedPct,
+        agentName,
+        commAmount,
+        displayStatusBank,
+        company,
+        leadsFolderVal,
+        statusPrVal
+      ]);
+
+      if (newRows.length >= 65) break;
+    }
+
+    if (newRows.length > 0) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: KPR_CONFIG.CONTROLLER_SPREADSHEET_ID,
+        range: `'Daftar Transaksi KPR'!A2:K${newRows.length + 1}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: newRows }
+      });
+      return newRows;
+    }
+  } catch (err: any) {
+    console.error('[Auto-Sync] Error syncing controller sheet:', err.message);
+  }
+  return ctrlRows;
+}
+
 export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<DealItem[]> {
   const sheets = await getSheetsService();
 
   // 1. Ambil data dari Controller Sheet: Daftar Transaksi KPR dengan FORMULA agar dapat URL hyperlink
   const ctrlRes = await sheets.spreadsheets.values.get({
     spreadsheetId: KPR_CONFIG.CONTROLLER_SPREADSHEET_ID,
-    range: "'Daftar Transaksi KPR'!A2:K70",
+    range: "'Daftar Transaksi KPR'!A2:K",
     valueRenderOption: 'FORMULA'
   });
 
-  const ctrlRows = ctrlRes.data.values || [];
+  let ctrlRows = ctrlRes.data.values || [];
 
   // 2. Ambil data dari Database Utama: All - Akad Transaction (A sampai AD agar mencakup Kolom AB #MO)
   const dbRes = await sheets.spreadsheets.values.get({
@@ -109,6 +251,9 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
   });
 
   const dbRows = dbRes.data.values || [];
+
+  // 3. Otomatis sinkronkan transaksi terbaru dari Database Utama jika ada baris transaksi baru
+  ctrlRows = await autoSyncControllerFromAkad(sheets, ctrlRows, dbRows);
 
   const dealsMap: Record<string, DealItem> = {};
 
