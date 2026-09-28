@@ -76,6 +76,22 @@ export async function POST(req: NextRequest) {
         // 3. Periksa kelengkapan file SPA Signed dan Konfirmasi Bank di Google Drive
         const fileCheck = await checkFilesInLeadFolder(folder.id);
 
+        // Gabungkan hasil verifikasi Drive dengan hasil eksekusi Apps Script terkini
+        const combinedFileCheck = {
+          hasSpa: !!(fileCheck.hasSpa || gasResult?.spa?.found),
+          hasBankEmail: !!(fileCheck.hasBankEmail || gasResult?.bankEmail?.found),
+          spaFile: fileCheck.spaFile || (gasResult?.spa?.found ? {
+            id: gasResult.spa.fileId,
+            name: gasResult.spa.fileName,
+            url: gasResult.spa.fileUrl
+          } : undefined),
+          bankEmailFile: fileCheck.bankEmailFile || (gasResult?.bankEmail?.found ? {
+            id: gasResult.bankEmail.fileId,
+            name: gasResult.bankEmail.fileName,
+            url: gasResult.bankEmail.fileUrl
+          } : undefined),
+        };
+
         // 4. Update Kolom J pada sheet controller (Daftar Transaksi KPR) jika ada baris controller
         if (row && row > 1) {
           await updateRowLeadsFolderInController(row, folder.url, folder.name);
@@ -87,7 +103,7 @@ export async function POST(req: NextRequest) {
           success: true,
           folder,
           gasResult,
-          fileCheck
+          fileCheck: combinedFileCheck
         });
       } catch (err: any) {
         console.error(`Gagal memproses folder leads untuk ${customerName}:`, err);
