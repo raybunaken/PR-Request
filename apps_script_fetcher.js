@@ -250,34 +250,42 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
   });
   var bankWord = (bankName || '').split(' ')[0] || '';
 
+  // Filter anti-false-positive: abaikan sistem tanda tangan SPA dan notifikasi otomatis
+  var antiFilters = ' -subject:"SPA" -from:hellosign.com -from:dropboxsign.com -from:docusign.net';
+
   var queries = [];
   if (customQuery && customQuery.trim()) {
     queries.push(customQuery.trim());
   }
 
-  // Tier 1: Subjek "Konfirmasi plafond" + Bank + Nama Nasabah
-  queries.push('subject:"Konfirmasi plafond" "' + bankWord + '" "' + cleanNameOnly + '"');
-  queries.push('subject:"Konfirmasi plafond" "' + cleanNameOnly + '"');
+  // Tier 1: Subjek "Konfirmasi" / "Konfirmasi plafond" + Bank + Nama Nasabah
+  if (bankWord) {
+    queries.push('subject:"Konfirmasi" "' + bankWord + '" "' + cleanNameOnly + '"' + antiFilters);
+    queries.push('subject:"Konfirmasi plafond" "' + bankWord + '" "' + cleanNameOnly + '"' + antiFilters);
+  }
+  queries.push('subject:"Konfirmasi" "' + cleanNameOnly + '"' + antiFilters);
+  queries.push('subject:"Konfirmasi plafond" "' + cleanNameOnly + '"' + antiFilters);
 
-  // Tier 2: Subjek "Konfirmasi plafond" + Bank + Kata Kunci Nasabah
+  // Tier 2: Subjek "Konfirmasi" + Bank + Kata Kunci Nasabah
   if (words.length >= 1) {
-    queries.push('subject:"Konfirmasi plafond" "' + bankWord + '" "' + words[0] + '"');
-    queries.push('subject:"Konfirmasi plafond" "' + words[0] + '"');
+    if (bankWord) {
+      queries.push('subject:"Konfirmasi" "' + bankWord + '" "' + words[0] + '"' + antiFilters);
+      queries.push('subject:"Konfirmasi plafond" "' + bankWord + '" "' + words[0] + '"' + antiFilters);
+    }
+    queries.push('subject:"Konfirmasi" "' + words[0] + '"' + antiFilters);
+    queries.push('subject:"Konfirmasi plafond" "' + words[0] + '"' + antiFilters);
   }
 
-  // Tier 3: Subjek "Konfirmasi" + Bank + Nama Nasabah
-  queries.push('subject:"Konfirmasi" "' + bankWord + '" "' + cleanNameOnly + '"');
-  queries.push('"Konfirmasi" "' + cleanNameOnly + '" "' + bankWord + '"');
-
-  // Tier 4: Body pencarian teks akad/done
-  queries.push('"' + cleanNameOnly + '" "done akad"');
-  queries.push('"' + cleanNameOnly + '" "plafond"');
+  // Tier 3: Body pencarian ketat yang wajib memuat kata "konfirmasi" dan "plafond" / "done akad"
+  queries.push('"' + cleanNameOnly + '" "konfirmasi" "plafond"' + antiFilters);
+  queries.push('"' + cleanNameOnly + '" "done akad"' + antiFilters);
   if (words.length >= 2) {
-    queries.push('"' + words[0] + '" "' + words[1] + '" "plafond"');
+    queries.push('"' + words[0] + '" "' + words[1] + '" "konfirmasi" "plafond"' + antiFilters);
   }
 
   var matchedThread = null;
   var queryUsed = '';
+  var internalEmail = (Session.getActiveUser().getEmail() || 'dzaky.rayssa@99.co').toLowerCase();
 
   for (var i = 0; i < queries.length; i++) {
     var q = queries[i];
@@ -285,25 +293,74 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
       var threads = GmailApp.search(q, 0, 5);
       for (var t = 0; t < threads.length; t++) {
         var th = threads[t];
+        var firstSub = (th.getFirstMessageSubject() || '').toLowerCase();
+
+        // 1. REJECT thread jika subjek berkaitan dengan SPA / Dropbox Sign / HelloSign
+        if (firstSub.indexOf('spa') !== -1 ||
+            firstSub.indexOf('hellosign') !== -1 ||
+            firstSub.indexOf('dropbox sign') !== -1 ||
+            firstSub.indexOf('signature') !== -1 ||
+            firstSub.indexOf('tanda tangan') !== -1 ||
+            firstSub.indexOf('has viewed') !== -1 ||
+            firstSub.indexOf('viewed:') !== -1 ||
+            firstSub.indexOf('completed:') !== -1 ||
+            firstSub.indexOf('copied on') !== -1 ||
+            firstSub.indexOf('perjanjian agen') !== -1) {
+          continue;
+        }
+
         var msgs = th.getMessages();
+        var isSignatureThread = false;
+        var hasBankOrExternalReply = false;
         var mentionsCust = false;
 
         for (var m = 0; m < msgs.length; m++) {
           var msg = msgs[m];
-          var body = (msg.getPlainBody() || '').toLowerCase();
+          var sender = (msg.getFrom() || '').toLowerCase();
           var sub = (msg.getSubject() || '').toLowerCase();
+          var body = (msg.getPlainBody() || '').toLowerCase();
 
-          if (sub.indexOf(cleanNameOnly.toLowerCase()) !== -1 || body.indexOf(cleanNameOnly.toLowerCase()) !== -1) {
-            mentionsCust = true;
+          // Reject jika pengirim berasal dari sistem tanda tangan digital
+          if (sender.indexOf('hellosign.com') !== -1 || 
+              sender.indexOf('dropboxsign.com') !== -1 || 
+              sender.indexOf('docusign.net') !== -1 ||
+              sender.indexOf('advertise@99.co') !== -1) {
+            isSignatureThread = true;
             break;
           }
-          if (words.length > 0 && words.some(function(w) { return body.indexOf(w.toLowerCase()) !== -1; })) {
+
+          // Cek apakah ada respon dari PIC Bank (email eksternal non-99.co) atau email forward dari PIC Bank
+          if (sender.indexOf(internalEmail) === -1 && 
+              sender.indexOf('@99.co') === -1 && 
+              sender.indexOf('@rumah123.com') === -1) {
+            hasBankOrExternalReply = true;
+          } else if (body.indexOf('forwarded message') !== -1 || body.indexOf('pesan yang diteruskan') !== -1) {
+            hasBankOrExternalReply = true;
+          }
+
+          // Verifikasi nasabah disebut dalam email
+          if (sub.indexOf(cleanNameOnly.toLowerCase()) !== -1 || body.indexOf(cleanNameOnly.toLowerCase()) !== -1) {
             mentionsCust = true;
-            break;
+          } else if (words.length > 0 && words.some(function(w) { return body.indexOf(w.toLowerCase()) !== -1; })) {
+            mentionsCust = true;
           }
         }
 
-        if (mentionsCust) {
+        if (isSignatureThread) continue;
+
+        // Subjek atau pesan wajib relevan dengan konfirmasi / plafond / akad
+        var threadText = (firstSub + ' ' + (msgs[0] ? msgs[0].getPlainBody() : '')).toLowerCase();
+        var isConfirmationTopic = threadText.indexOf('konfirmasi') !== -1 || 
+                                  threadText.indexOf('plafond') !== -1 || 
+                                  threadText.indexOf('akad') !== -1 ||
+                                  threadText.indexOf('sp3k') !== -1 ||
+                                  threadText.indexOf('offering letter') !== -1;
+
+        // Syarat thread valid:
+        // 1. Menyebut nama nasabah
+        // 2. Membahas konfirmasi / plafond / akad
+        // 3. Ada balasan / respon dari PIC Bank (bukan hanya email keluar dari Dzaky yang belum dibalas)
+        if (mentionsCust && isConfirmationTopic && (hasBankOrExternalReply || (customQuery && customQuery.trim()))) {
           matchedThread = th;
           queryUsed = q;
           break;
@@ -318,7 +375,7 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
   if (!matchedThread) {
     return {
       found: false,
-      message: 'Tidak ditemukan email konfirmasi bank di Gmail untuk nasabah ' + customerName,
+      message: 'Tidak ditemukan email konfirmasi bank di Gmail (atau belum ada balasan dari PIC Bank) untuk nasabah ' + customerName,
       queriesTested: queries.slice(0, 4)
     };
   }

@@ -530,7 +530,7 @@ export async function checkFilesInLeadFolder(folderId: string): Promise<{
         hasSpa = true;
         spaFile = { id: f.id, name: f.name, url: f.webViewLink || `https://drive.google.com/file/d/${f.id}/view` };
       }
-      if ((nameLower.includes('konfirmasi') || nameLower.includes('email') || nameLower.includes('plafond')) && nameLower.endsWith('.pdf')) {
+      if (!nameLower.includes('spa') && (nameLower.includes('konfirmasi') || nameLower.includes('email') || nameLower.includes('plafond')) && nameLower.endsWith('.pdf')) {
         hasBankEmail = true;
         bankEmailFile = { id: f.id, name: f.name, url: f.webViewLink || `https://drive.google.com/file/d/${f.id}/view` };
       }
