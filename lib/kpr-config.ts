@@ -23,7 +23,7 @@ export const KPR_CONFIG = {
   FINANCE_LEADS_ROOT_FOLDER_ID: process.env.DRIVE_FINANCE_LEADS_FOLDER_ID || '1KlCBYpZfk7vHyHqdcuUDiKo9RsRBpnJO',
   TEMPLATE_PR_ID: process.env.DRIVE_TEMPLATE_PR_ID || '1QlRwxUp9taMCfYLqwOxfEShTGGIX3Btat2GsI_GOqtQ',
   SERVICE_ACCOUNT_EMAIL: 'robot-kpr@kpr-automation.iam.gserviceaccount.com',
-  APPS_SCRIPT_WEBAPP_URL: 'https://script.google.com/macros/s/AKfycbwu_4adoSJf0H_KZl1w_hL7ceRCA7I8NwhJEHNthEN0aD2JG1yHLjNqC8SEpG6prvJphQ/exec',
+  APPS_SCRIPT_WEBAPP_URL: process.env.APPS_SCRIPT_WEBAPP_URL || 'https://script.google.com/macros/s/AKfycbxiBd3Cy5V3hpyqmr57u0m8P9_GTiWXsjx3Um31fMfOJiTGDHYSsuXx7VKOavBfjMm5fw/exec',
 
   // Master Metadata
   REQUESTER_NAME: 'Fransisca Octarina',
