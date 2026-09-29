@@ -107,6 +107,9 @@ export async function POST(req: NextRequest) {
           prUrl
         );
 
+        const downloadPrUrl = `/api/download?row=${deal.row}&type=pr`;
+        const downloadAgreementUrl = `/api/download?row=${deal.row}&type=agreement`;
+
         results.push({
           row: deal.row,
           customerName: deal.customerName,
@@ -114,7 +117,10 @@ export async function POST(req: NextRequest) {
           prUrl,
           folderUrl,
           leadsFolderUrl,
-          driveSynced: driveConnected
+          downloadPrUrl,
+          downloadAgreementUrl,
+          driveSynced: driveConnected && !!prUrl,
+          driveQuotaLimited: driveConnected && !prUrl
         });
       } catch (err: any) {
         console.error(`Gagal memproses nasabah ${deal.customerName}:`, err);

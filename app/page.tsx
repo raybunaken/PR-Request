@@ -65,10 +65,14 @@ interface DealItem {
 
 interface CompletedItem {
   name: string;
+  row?: number;
   prUrl?: string;
   folderUrl?: string;
   leadsFolderUrl?: string;
+  downloadPrUrl?: string;
+  downloadAgreementUrl?: string;
   driveSynced: boolean;
+  driveQuotaLimited?: boolean;
 }
 
 export default function DashboardPage() {
@@ -320,10 +324,14 @@ export default function DashboardPage() {
           const resObj = data.results?.[0];
           completed.push({
             name: item.customerName,
+            row: item.row,
             prUrl: resObj?.prUrl,
             folderUrl: resObj?.folderUrl,
             leadsFolderUrl: resObj?.leadsFolderUrl,
-            driveSynced: !!resObj?.driveSynced
+            downloadPrUrl: resObj?.downloadPrUrl || `/api/download?row=${item.row}&type=pr`,
+            downloadAgreementUrl: resObj?.downloadAgreementUrl || `/api/download?row=${item.row}&type=agreement`,
+            driveSynced: !!resObj?.driveSynced,
+            driveQuotaLimited: !!resObj?.driveQuotaLimited
           });
         } else {
           failed.push(item.customerName);
@@ -372,10 +380,14 @@ export default function DashboardPage() {
           ...prev,
           completed: [{
             name: deal.customerName,
+            row: deal.row,
             prUrl: resObj?.prUrl,
             folderUrl: resObj?.folderUrl,
             leadsFolderUrl: resObj?.leadsFolderUrl,
-            driveSynced: !!resObj?.driveSynced
+            downloadPrUrl: resObj?.downloadPrUrl || `/api/download?row=${deal.row}&type=pr`,
+            downloadAgreementUrl: resObj?.downloadAgreementUrl || `/api/download?row=${deal.row}&type=agreement`,
+            driveSynced: !!resObj?.driveSynced,
+            driveQuotaLimited: !!resObj?.driveQuotaLimited
           }]
         }));
       } else {
@@ -1072,10 +1084,29 @@ export default function DashboardPage() {
                                   onClick={() => handleProcessSinglePR(deal)}
                                   disabled={isProcessing}
                                   className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700 transition-colors cursor-pointer"
+                                  title="Generate PR, Agreement PDF, & Sinkron Drive"
                                 >
                                   <Play className="w-3 h-3 fill-current" />
                                   <span>Proses</span>
                                 </button>
+                                <a
+                                  href={`/api/download?row=${deal.row}&type=pr`}
+                                  download
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors cursor-pointer no-underline"
+                                  title="Unduh Berkas PR Request Excel (.xlsx)"
+                                >
+                                  <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
+                                  <span>PR</span>
+                                </a>
+                                <a
+                                  href={`/api/download?row=${deal.row}&type=agreement`}
+                                  download
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 transition-colors cursor-pointer no-underline"
+                                  title="Unduh Berkas Agreement Pembagian Komisi PDF (4 Halaman Utuh)"
+                                >
+                                  <FileText className="w-3 h-3 text-purple-600" />
+                                  <span>PDF</span>
+                                </a>
                               </div>
                             </td>
                           </tr>
@@ -1481,50 +1512,63 @@ export default function DashboardPage() {
                       {progress.completed.map((item, idx) => (
                         <div
                           key={idx}
-                          className="flex flex-col sm:flex-row sm:items-center justify-between text-xs p-2.5 rounded-lg bg-white border border-slate-200/80 shadow-2xs gap-2"
+                          className="flex flex-col text-xs p-3 rounded-xl bg-white border border-slate-200/80 shadow-2xs gap-2.5"
                         >
-                          <span className="font-semibold text-slate-800 truncate mr-2">
-                            {item.name}
-                          </span>
-                          <div className="flex flex-wrap items-center gap-2 shrink-0">
-                            {item.folderUrl ? (
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-100 pb-2">
+                            <span className="font-bold text-slate-900 text-xs">
+                              {item.name}
+                            </span>
+                            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 w-fit">
+                              Dokumen Selesai Di-generate
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            {/* Direct Download PR Excel Button */}
+                            <a
+                              href={item.downloadPrUrl || `/api/download?row=${item.row}&type=pr`}
+                              download
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors no-underline cursor-pointer"
+                              title="Unduh Spreadsheet PR Request (.xlsx)"
+                            >
+                              <FileSpreadsheet className="w-3.5 h-3.5" />
+                              <span>Unduh PR (.xlsx)</span>
+                            </a>
+
+                            {/* Direct Download Agreement PDF Button */}
+                            <a
+                              href={item.downloadAgreementUrl || `/api/download?row=${item.row}&type=agreement`}
+                              download
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-colors no-underline cursor-pointer"
+                              title="Unduh Agreement Pembagian Komisi PDF (4 Halaman)"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              <span>Unduh Agreement (.pdf)</span>
+                            </a>
+
+                            {item.folderUrl && (
                               <a
                                 href={item.folderUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-colors"
-                                title="Buka Folder Drive Nasabah tempat PR, Agreement PDF, PKS, & No Rekening tersimpan"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-colors no-underline ml-auto cursor-pointer"
+                                title="Buka Folder Drive Nasabah tempat lampiran tersimpan"
                               >
-                                <FolderOpen className="w-3.5 h-3.5" />
-                                <span>Buka Folder PR (Attachment)</span>
-                                <ExternalLink className="w-3 h-3 ml-0.5 opacity-80" />
-                              </a>
-                            ) : null}
-                            {item.prUrl && (
-                              <a
-                                href={item.prUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-[11px] text-slate-600 hover:text-slate-900 font-medium px-2 py-1 rounded-md hover:bg-slate-100 transition-colors"
-                                title="Buka Spreadsheet PR Langsung"
-                              >
-                                <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
-                                <span>File PR</span>
-                              </a>
-                            )}
-                            {item.leadsFolderUrl && (
-                              <a
-                                href={item.leadsFolderUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded-md hover:bg-indigo-50 transition-colors"
-                                title="Buka Folder Bukti Finance (SPA & Email Bank)"
-                              >
-                                <FolderCheck className="w-3 h-3" />
-                                <span>Folder Leads (Finance)</span>
+                                <FolderOpen className="w-3.5 h-3.5 text-blue-600" />
+                                <span>Buka Folder Drive</span>
+                                <ExternalLink className="w-3 h-3 opacity-60 ml-0.5" />
                               </a>
                             )}
                           </div>
+
+                          {item.driveQuotaLimited && (
+                            <div className="p-2 rounded-lg bg-amber-50 border border-amber-200/80 text-[11px] text-amber-800 flex items-start gap-1.5 leading-relaxed">
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                              <span>
+                                Berkas PR (.xlsx) &amp; Agreement (.pdf) siap diunduh lewat tombol di atas. (Di Google Drive, akun Service Account dibatasi kuota 0 MB oleh Google untuk file upload/copy, sehingga hanya file shortcut lampiran identitas yang masuk ke folder Drive).
+                              </span>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
