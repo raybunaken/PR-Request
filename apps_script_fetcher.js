@@ -338,11 +338,25 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
             hasBankOrExternalReply = true;
           }
 
-          // Verifikasi nasabah disebut dalam email
-          if (sub.indexOf(cleanNameOnly.toLowerCase()) !== -1 || body.indexOf(cleanNameOnly.toLowerCase()) !== -1) {
+          // Verifikasi nasabah disebut dalam email secara spesifik (BUKAN hanya 1 kata nama depan yang bisa bentrok dengan nama PIC Bank)
+          var custLower = cleanNameOnly.toLowerCase();
+          if (sub.indexOf(custLower) !== -1 || body.indexOf(custLower) !== -1) {
             mentionsCust = true;
-          } else if (words.length > 0 && words.some(function(w) { return body.indexOf(w.toLowerCase()) !== -1; })) {
-            mentionsCust = true;
+          } else if (words.length >= 2) {
+            // Wajib mencocokkan minimal 2 kata dari nama nasabah (misal: "Dedi" dan "Sugiharto")
+            var matchedWordCount = 0;
+            for (var wIdx = 0; wIdx < words.length; wIdx++) {
+              if (body.indexOf(words[wIdx].toLowerCase()) !== -1 || sub.indexOf(words[wIdx].toLowerCase()) !== -1) {
+                matchedWordCount++;
+              }
+            }
+            if (matchedWordCount >= 2) {
+              mentionsCust = true;
+            }
+          } else if (words.length === 1) {
+            if (body.indexOf(words[0].toLowerCase()) !== -1 || sub.indexOf(words[0].toLowerCase()) !== -1) {
+              mentionsCust = true;
+            }
           }
         }
 
@@ -356,10 +370,23 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
                                   threadText.indexOf('sp3k') !== -1 ||
                                   threadText.indexOf('offering letter') !== -1;
 
+        // Validasi kesesuaian Bank: Tolak jika email jelas-jelas ditujukan ke bank lain (misal mencari BSI tetapi email tentang CIMB Niaga)
+        if (bankWord) {
+          var bwLower = bankWord.toLowerCase();
+          var bankKeywords = ['danamon', 'cimb', 'mandiri', 'permata', 'uob', 'bsi', 'maybank', 'sinarmas', 'muamalat', 'bca', 'btn', 'bri', 'bni', 'hana'];
+          var otherBanks = bankKeywords.filter(function(b) { return b !== bwLower; });
+          var hasTargetBank = threadText.indexOf(bwLower) !== -1;
+          var hasOtherBankOnly = otherBanks.some(function(b) { return threadText.indexOf(b) !== -1; }) && !hasTargetBank;
+          if (hasOtherBankOnly) {
+            continue; // Abaikan thread bank lain
+          }
+        }
+
         // Syarat thread valid:
-        // 1. Menyebut nama nasabah
+        // 1. Menyebut nama nasabah secara valid (bukan sekadar nama depan PIC bank di to/cc)
         // 2. Membahas konfirmasi / plafond / akad
-        // 3. Ada balasan / respon dari PIC Bank (bukan hanya email keluar dari Dzaky yang belum dibalas)
+        // 3. Bank sesuai
+        // 4. Ada balasan / respon dari PIC Bank (bukan hanya email keluar dari Dzaky yang belum dibalas)
         if (mentionsCust && isConfirmationTopic && (hasBankOrExternalReply || (customQuery && customQuery.trim()))) {
           matchedThread = th;
           queryUsed = q;
