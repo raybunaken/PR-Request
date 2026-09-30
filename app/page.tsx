@@ -30,10 +30,12 @@ import {
   Mail,
   ChevronDown,
   ChevronUp,
-  Compass
+  Compass,
+  MessageSquare
 } from 'lucide-react';
 import Link from 'next/link';
 import AppSwitcher from '@/components/AppSwitcher';
+import { resolveAgent } from '@/lib/kpr-config';
 
 interface DealItem {
   row: number;
@@ -65,6 +67,7 @@ interface DealItem {
 
 interface CompletedItem {
   name: string;
+  agentName?: string;
   row?: number;
   prUrl?: string;
   folderUrl?: string;
@@ -114,6 +117,7 @@ export default function DashboardPage() {
     failed: string[];
   }>({ total: 0, current: 0, currentName: '', completed: [], failed: [] });
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [copiedWA, setCopiedWA] = useState<string | null>(null);
 
   // Progress state for Leads Folder Action
   const [isProcessingLeads, setIsProcessingLeads] = useState<boolean>(false);
@@ -284,6 +288,102 @@ export default function DashboardPage() {
     setSelectedRows(next);
   };
 
+  // Helper Clipboard & Format Pesan WhatsApp untuk Laporan Manager
+  const copyToClipboard = async (text: string): Promise<boolean> => {
+    if (typeof window !== 'undefined' && navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        // Fallback jika navigator.clipboard dibatasi oleh browser/iframe
+      }
+    }
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const formatWhatsAppMessage = (
+    items: Array<{
+      customerName: string;
+      agentName?: string;
+      prUrl?: string;
+      folderUrl?: string;
+    }>
+  ): string => {
+    const chunks: string[] = ['payment to agent', ''];
+
+    items.forEach((item, index) => {
+      chunks.push(item.customerName);
+      chunks.push(item.agentName || 'Agent KPR');
+      chunks.push('');
+      chunks.push('PR Request:');
+      chunks.push(item.prUrl || '-');
+      chunks.push('');
+      chunks.push('Folder:');
+      chunks.push(item.folderUrl || '-');
+
+      if (index < items.length - 1) {
+        chunks.push('');
+      }
+    });
+
+    return chunks.join('\n');
+  };
+
+  const handleCopyWhatsAppAll = async (items: CompletedItem[]) => {
+    if (!items || items.length === 0) return;
+    const text = formatWhatsAppMessage(
+      items.map(it => ({
+        customerName: it.name,
+        agentName: it.agentName || 'Agent KPR',
+        prUrl: it.prUrl,
+        folderUrl: it.folderUrl
+      }))
+    );
+    await copyToClipboard(text);
+    setCopiedWA('all');
+    setTimeout(() => setCopiedWA(null), 2500);
+  };
+
+  const handleCopyWhatsAppSingle = async (item: CompletedItem, key: string) => {
+    const text = formatWhatsAppMessage([{
+      customerName: item.name,
+      agentName: item.agentName || 'Agent KPR',
+      prUrl: item.prUrl,
+      folderUrl: item.folderUrl
+    }]);
+    await copyToClipboard(text);
+    setCopiedWA(key);
+    setTimeout(() => setCopiedWA(null), 2500);
+  };
+
+  const handleCopyWhatsAppFromDeals = async (selectedDeals: DealItem[], key?: string) => {
+    if (!selectedDeals || selectedDeals.length === 0) return;
+    const text = formatWhatsAppMessage(
+      selectedDeals.map(d => ({
+        customerName: d.customerName,
+        agentName: d.agentName || resolveAgent(d.percentage).name,
+        prUrl: d.prFileUrl || d.prFolderUrl,
+        folderUrl: d.prFolderUrl || d.prFileUrl
+      }))
+    );
+    await copyToClipboard(text);
+    setCopiedWA(key || 'table-selection');
+    setTimeout(() => setCopiedWA(null), 2500);
+  };
+
   // PR Batch process
   const handleStartBatchPR = async () => {
     const toProcess = deals.filter(d => selectedRows.has(d.row));
@@ -324,6 +424,7 @@ export default function DashboardPage() {
           const resObj = data.results?.[0];
           completed.push({
             name: item.customerName,
+            agentName: item.agentName || resolveAgent(item.percentage).name,
             row: item.row,
             prUrl: resObj?.prUrl,
             folderUrl: resObj?.folderUrl,
@@ -380,6 +481,7 @@ export default function DashboardPage() {
           ...prev,
           completed: [{
             name: deal.customerName,
+            agentName: deal.agentName || resolveAgent(deal.percentage).name,
             row: deal.row,
             prUrl: resObj?.prUrl,
             folderUrl: resObj?.folderUrl,
@@ -857,7 +959,7 @@ export default function DashboardPage() {
                   )}
                 </div>
 
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3">
                   {/* Option: Sekaligus buat Folder Leads */}
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer select-none">
                     <input
@@ -868,6 +970,29 @@ export default function DashboardPage() {
                     />
                     <span>Sekaligus Hubungkan Folder Leads Finance (SPA + Email)</span>
                   </label>
+
+                  {selectedRows.size > 0 && (
+                    <button
+                      onClick={() => {
+                        const selected = filteredDeals.filter(d => selectedRows.has(d.row));
+                        handleCopyWhatsAppFromDeals(selected);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs transition-all cursor-pointer"
+                      title="Salin format teks WhatsApp untuk seluruh transaksi yang dipilih"
+                    >
+                      {copiedWA === 'table-selection' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Format WA Tersalin!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Salin Format WA ({selectedRows.size})</span>
+                        </>
+                      )}
+                    </button>
+                  )}
 
                   <button
                     onClick={handleStartBatchPR}
@@ -1089,6 +1214,25 @@ export default function DashboardPage() {
                                   <Play className="w-3 h-3 fill-current" />
                                   <span>Proses</span>
                                 </button>
+                                {(deal.prFolderUrl || deal.prFileUrl) && (
+                                  <button
+                                    onClick={() => handleCopyWhatsAppFromDeals([deal], `deal-${deal.row}`)}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 transition-colors cursor-pointer"
+                                    title="Salin pesan WA transaksi ini untuk manager"
+                                  >
+                                    {copiedWA === `deal-${deal.row}` ? (
+                                      <>
+                                        <Check className="w-3 h-3 text-emerald-600" />
+                                        <span>Tersalin!</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="w-3 h-3 text-emerald-600" />
+                                        <span>Salin WA</span>
+                                      </>
+                                    )}
+                                  </button>
+                                )}
                                 <a
                                   href={`/api/download?row=${deal.row}&type=pr`}
                                   download
@@ -1449,7 +1593,7 @@ export default function DashboardPage() {
       {/* Progress / Completion Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 {isProcessing ? (
@@ -1507,6 +1651,42 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
+                  {/* Banner Salin Format WhatsApp untuk Manager */}
+                  {progress.completed.length > 0 && (
+                    <div className="p-3 rounded-xl bg-emerald-600 text-white shadow-xs flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                          <MessageSquare className="w-4 h-4 text-white" />
+                        </div>
+                        <div className="truncate">
+                          <p className="text-xs font-bold leading-tight">
+                            Format Pesan WhatsApp Manager
+                          </p>
+                          <p className="text-[11px] text-emerald-100 truncate mt-0.5">
+                            payment to agent &bull; Link PR Request &amp; Folder Drive
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleCopyWhatsAppAll(progress.completed)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-emerald-800 hover:bg-emerald-50 shadow-xs transition-all cursor-pointer shrink-0"
+                        title="Salin seluruh format WhatsApp laporan payment to agent untuk dikirim ke manager"
+                      >
+                        {copiedWA === 'all' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Tersalin!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>Salin Semua ({progress.completed.length})</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+
                   {progress.completed.length > 0 && (
                     <div className="max-h-64 overflow-y-auto space-y-2.5 border border-slate-100 rounded-xl p-3 bg-slate-50/50">
                       {progress.completed.map((item, idx) => (
@@ -1519,56 +1699,80 @@ export default function DashboardPage() {
                               {item.name}
                             </span>
                             <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 w-fit">
-                              Dokumen Selesai Di-generate
+                              5 Berkas Tersimpan di Drive
                             </span>
                           </div>
 
                           <div className="flex flex-wrap items-center gap-2">
-                            {/* Direct Download PR Excel Button */}
-                            <a
-                              href={item.downloadPrUrl || `/api/download?row=${item.row}&type=pr`}
-                              download
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors no-underline cursor-pointer"
-                              title="Unduh Spreadsheet PR Request (.xlsx)"
-                            >
-                              <FileSpreadsheet className="w-3.5 h-3.5" />
-                              <span>Unduh PR (.xlsx)</span>
-                            </a>
-
-                            {/* Direct Download Agreement PDF Button */}
-                            <a
-                              href={item.downloadAgreementUrl || `/api/download?row=${item.row}&type=agreement`}
-                              download
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-colors no-underline cursor-pointer"
-                              title="Unduh Agreement Pembagian Komisi PDF (4 Halaman)"
-                            >
-                              <FileText className="w-3.5 h-3.5" />
-                              <span>Unduh Agreement (.pdf)</span>
-                            </a>
-
                             {item.folderUrl && (
                               <a
                                 href={item.folderUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-colors no-underline ml-auto cursor-pointer"
-                                title="Buka Folder Drive Nasabah tempat lampiran tersimpan"
+                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-xs transition-colors no-underline cursor-pointer"
+                                title="Buka Folder Google Drive Nasabah tempat seluruh berkas tersimpan"
                               >
-                                <FolderOpen className="w-3.5 h-3.5 text-blue-600" />
+                                <FolderOpen className="w-3.5 h-3.5 text-white" />
                                 <span>Buka Folder Drive</span>
-                                <ExternalLink className="w-3 h-3 opacity-60 ml-0.5" />
+                                <ExternalLink className="w-3 h-3 opacity-80 ml-0.5" />
                               </a>
                             )}
-                          </div>
 
-                          {item.driveQuotaLimited && (
-                            <div className="p-2 rounded-lg bg-amber-50 border border-amber-200/80 text-[11px] text-amber-800 flex items-start gap-1.5 leading-relaxed">
-                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                              <span>
-                                Berkas PR (.xlsx) &amp; Agreement (.pdf) siap diunduh lewat tombol di atas. (Di Google Drive, akun Service Account dibatasi kuota 0 MB oleh Google untuk file upload/copy, sehingga hanya file shortcut lampiran identitas yang masuk ke folder Drive).
-                              </span>
+                            {item.prUrl && (
+                              <a
+                                href={item.prUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 transition-colors no-underline cursor-pointer"
+                                title="Buka Spreadsheet PR Request di Google Drive"
+                              >
+                                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Buka PR Request</span>
+                                <ExternalLink className="w-3 h-3 opacity-70 ml-0.5" />
+                              </a>
+                            )}
+
+                            {/* Tombol Salin Format WA Satuan */}
+                            <button
+                              onClick={() => handleCopyWhatsAppSingle(item, `item-${idx}`)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 transition-colors cursor-pointer"
+                              title="Salin pesan WA khusus nasabah ini untuk manager"
+                            >
+                              {copiedWA === `item-${idx}` ? (
+                                <>
+                                  <Check className="w-3 h-3 text-emerald-600" />
+                                  <span>Tersalin!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3 text-emerald-600" />
+                                  <span>Salin WA</span>
+                                </>
+                              )}
+                            </button>
+
+                            {/* Tombol Salinan Unduh Cadangan */}
+                            <div className="flex items-center gap-1.5 ml-auto">
+                              <a
+                                href={item.downloadPrUrl || `/api/download?row=${item.row}&type=pr`}
+                                download
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 transition-colors no-underline cursor-pointer"
+                                title="Unduh Salinan Excel (.xlsx) ke Komputer"
+                              >
+                                <Download className="w-3 h-3 text-slate-500" />
+                                <span>Salinan PR</span>
+                              </a>
+                              <a
+                                href={item.downloadAgreementUrl || `/api/download?row=${item.row}&type=agreement`}
+                                download
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 transition-colors no-underline cursor-pointer"
+                                title="Unduh Salinan PDF Agreement ke Komputer"
+                              >
+                                <Download className="w-3 h-3 text-slate-500" />
+                                <span>Salinan PDF</span>
+                              </a>
                             </div>
-                          )}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1589,10 +1793,29 @@ export default function DashboardPage() {
             </div>
 
             {!isProcessing && (
-              <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
+                {progress.completed.length > 0 && (
+                  <button
+                    onClick={() => handleCopyWhatsAppAll(progress.completed)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors cursor-pointer"
+                    title="Salin seluruh format WhatsApp laporan payment to agent untuk dikirim ke manager"
+                  >
+                    {copiedWA === 'all' ? (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Format WA Berhasil Disalin!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        <span>Salin Format WA ({progress.completed.length} Nasabah)</span>
+                      </>
+                    )}
+                  </button>
+                )}
                 <button
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-colors cursor-pointer ml-auto"
                 >
                   Selesai
                 </button>

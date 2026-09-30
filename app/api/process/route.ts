@@ -3,7 +3,7 @@ import { DealItem, updateRowStatusInController, updateRowLeadsFolderInController
 import { generatePRExcelBuffer } from '@/lib/pr-builder';
 import { generateAgreementPdfBuffer } from '@/lib/agreement-builder';
 import { isDriveFolderAccessible, processDealDriveWorkflow, getOrCreateFinanceLeadFolder } from '@/lib/drive-client';
-import { KPR_CONFIG } from '@/lib/kpr-config';
+import { KPR_CONFIG, resolveAgent } from '@/lib/kpr-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,37 +31,71 @@ export async function POST(req: NextRequest) {
         const agreementPdfBuffer = await generateAgreementPdfBuffer(deal);
 
         // 2. Generate PR Excel Buffer
-        await generatePRExcelBuffer(deal);
-
-        // 2b. Eksekusi automasi via Google Apps Script Web App (menjamin berkas PR Spreadsheet & Agreement PDF dibuat tanpa kendala kuota)
-        if (KPR_CONFIG.APPS_SCRIPT_WEBAPP_URL) {
-          try {
-            await fetch(KPR_CONFIG.APPS_SCRIPT_WEBAPP_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify({
-                row: deal.row,
-                partnerRow: deal.partnerRow
-              }),
-              redirect: 'follow'
-            });
-          } catch (err: any) {
-            console.warn(`Peringatan: Gagal memanggil Apps Script untuk ${deal.customerName}:`, err.message);
-          }
-        }
+        const prExcelBuffer = await generatePRExcelBuffer(deal);
 
         let prUrl = '';
+        let agreementUrl = '';
         let folderUrl = '';
         let leadsFolderUrl = deal.leadsFolderUrl || '';
+        let targetFolderId = '';
 
-        // 3. Jika Google Drive terhubung, sinkronkan langsung ke Google Drive
+        // 3. Jika Google Drive terhubung, buat folder nasabah dan pasang shortcut dokumen
         if (driveConnected) {
           try {
             const driveRes = await processDealDriveWorkflow(deal, agreementPdfBuffer);
-            prUrl = driveRes.prUrl;
-            folderUrl = driveRes.folderUrl;
+            prUrl = driveRes.prUrl || '';
+            agreementUrl = driveRes.agreementUrl || '';
+            folderUrl = driveRes.folderUrl || '';
+            targetFolderId = driveRes.folderId || '';
+            
+            if (!targetFolderId && folderUrl) {
+              const m = folderUrl.match(/folders\/([a-zA-Z0-9_-]+)/);
+              if (m) targetFolderId = m[1];
+            }
           } catch (driveErr) {
             console.warn(`Drive direct sync skipped:`, driveErr);
+          }
+
+          // 3b. Unggah berkas PR Excel & Agreement PDF via Google Apps Script Web App
+          // (Menembus limit kuota storage Service Account dengan akun Google Workspace pengguna)
+          if ((!prUrl || !agreementUrl) && targetFolderId && KPR_CONFIG.APPS_SCRIPT_WEBAPP_URL) {
+            try {
+              const agent = resolveAgent(deal.percentage);
+              const cleanCust = deal.customerName.replace(/[^a-zA-Z0-9 _-]/g, '').trim();
+              const prFileName = `PR Request - Referral Fee Agent a.n. ${agent.name} - ${cleanCust}.xlsx`;
+              const agreementFileName = `Agreement Pembagian Komisi Agent - ${agent.name} - ${cleanCust}.pdf`;
+
+              const gasRes = await fetch(KPR_CONFIG.APPS_SCRIPT_WEBAPP_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                  folderId: targetFolderId,
+                  customerName: deal.customerName,
+                  company: deal.company,
+                  bankName: deal.bank || '',
+                  agentName: agent.name,
+                  agentPayeeName: agent.payeeName,
+                  agentBankName: agent.bankName,
+                  agentAccountNumber: agent.accountNumber,
+                  agentAccountName: agent.accountName,
+                  amount: deal.targetAmount,
+                  prFileName: `PR Request - Referral Fee Agent a.n. ${agent.name} - ${cleanCust}`,
+                  agreementFileName: agreementFileName,
+                  agreementBase64: agreementPdfBuffer.toString('base64')
+                }),
+                redirect: 'follow'
+              });
+
+              if (gasRes.ok) {
+                const gasData = await gasRes.json();
+                if (gasData.success) {
+                  if (gasData.prUrl) prUrl = gasData.prUrl;
+                  if (gasData.agreementUrl) agreementUrl = gasData.agreementUrl;
+                }
+              }
+            } catch (gasErr: any) {
+              console.warn(`Peringatan: Gagal memanggil Apps Script untuk ${deal.customerName}:`, gasErr.message);
+            }
           }
 
           // Jika diminta sekalian buat Folder Leads Finance

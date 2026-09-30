@@ -340,7 +340,13 @@ export async function attachAgentDocShortcuts(
     for (const doc of agentDocs) {
       if (!doc.name || !doc.id) continue;
       const clean = doc.name.toLowerCase().trim();
-      if (clean.includes('pr request') || clean.includes('agreement') || clean.includes('perjanjian')) {
+      // Lewati file PR, Agreement, atau berkas PKS (PKS ditangani khusus oleh attachBankPKSShortcut)
+      if (
+        clean.includes('pr request') ||
+        clean.includes('agreement') ||
+        clean.includes('perjanjian') ||
+        clean.includes('pks')
+      ) {
         continue;
       }
       if (existingTargetIds.has(doc.id) || existingNames.has(clean)) {
@@ -348,14 +354,34 @@ export async function attachAgentDocShortcuts(
       }
 
       try {
-        await drive.files.create({
-          requestBody: {
-            name: doc.name,
-            mimeType: 'application/vnd.google-apps.shortcut',
-            shortcutDetails: { targetId: doc.id },
-            parents: [leadFolderId]
+        if (doc.mimeType === 'application/vnd.google-apps.shortcut') {
+          await drive.files.copy({
+            fileId: doc.id,
+            requestBody: {
+              name: doc.name,
+              parents: [leadFolderId]
+            }
+          });
+        } else {
+          try {
+            await drive.files.create({
+              requestBody: {
+                name: doc.name,
+                mimeType: 'application/vnd.google-apps.shortcut',
+                shortcutDetails: { targetId: doc.id },
+                parents: [leadFolderId]
+              }
+            });
+          } catch (createErr: any) {
+            await drive.files.copy({
+              fileId: doc.id,
+              requestBody: {
+                name: doc.name,
+                parents: [leadFolderId]
+              }
+            });
           }
-        });
+        }
         count++;
       } catch (err: any) {
         console.warn(`Gagal membuat shortcut dokumen agen ${doc.name}:`, err.message);
@@ -378,10 +404,11 @@ export async function attachBankPKSShortcut(
   const drive = await getDriveService();
   try {
     const rawBankClean = (bankName || '').toLowerCase().trim();
+    // Urutan prioritas keyword agar nama yang lebih panjang atau spesifik dicocokkan lebih dahulu
     const bankKeywords = [
-      'danamon', 'uob', 'maybank', 'permata', 'ina',
-      'mandiri', 'bsi', 'cimb', 'muamalat', 'bukopin',
-      'ringkas', 'ganesha', 'bca', 'btn', 'bri', 'bni', 'hana'
+      'danamon', 'sinarmas', 'maybank', 'permata', 'muamalat',
+      'bukopin', 'mandiri', 'ganesha', 'ringkas', 'cimb',
+      'uob', 'bsi', 'bca', 'btn', 'bri', 'bni', 'hana', 'ina'
     ];
     let matchedKeyword = '';
     for (const kw of bankKeywords) {
@@ -407,24 +434,56 @@ export async function attachBankPKSShortcut(
     const searchRes = await drive.files.list({
       q: `name contains 'PKS' and trashed = false`,
       fields: 'files(id, name, mimeType, shortcutDetails)',
-      pageSize: 60
+      pageSize: 150
     });
 
+    const matchesBank = (fileName: string, keyword: string): boolean => {
+      const f = fileName.toLowerCase();
+      if (keyword === 'ina') {
+        return /\bina\b/i.test(f) && !f.includes('sinarmas');
+      }
+      return f.includes(keyword);
+    };
+
     const candidate = (searchRes.data.files || []).find(
-      f => f.name && f.name.toLowerCase().includes(matchedKeyword)
+      f => f.name && matchesBank(f.name, matchedKeyword)
     );
 
     if (candidate && candidate.id) {
-      const targetId = candidate.shortcutDetails?.targetId || candidate.id;
-      await drive.files.create({
-        requestBody: {
-          name: candidate.name,
-          mimeType: 'application/vnd.google-apps.shortcut',
-          shortcutDetails: { targetId },
-          parents: [leadFolderId]
+      if (candidate.mimeType === 'application/vnd.google-apps.shortcut') {
+        // Jika candidate berupa shortcut, duplikasi shortcut tersebut ke folder nasabah
+        // (Drive API melarang membuat shortcut baru yang mentarget shortcut lain)
+        await drive.files.copy({
+          fileId: candidate.id,
+          requestBody: {
+            name: candidate.name,
+            parents: [leadFolderId]
+          }
+        });
+        return true;
+      } else {
+        // Jika candidate berupa berkas fisik asli
+        try {
+          await drive.files.create({
+            requestBody: {
+              name: candidate.name,
+              mimeType: 'application/vnd.google-apps.shortcut',
+              shortcutDetails: { targetId: candidate.id },
+              parents: [leadFolderId]
+            }
+          });
+          return true;
+        } catch (createErr: any) {
+          await drive.files.copy({
+            fileId: candidate.id,
+            requestBody: {
+              name: candidate.name,
+              parents: [leadFolderId]
+            }
+          });
+          return true;
         }
-      });
-      return true;
+      }
     }
   } catch (err: any) {
     console.warn(`Gagal memasang shortcut PKS bank ${bankName}:`, err.message);
@@ -438,26 +497,45 @@ export async function attachBankPKSShortcut(
 export async function processDealDriveWorkflow(
   deal: DealItem,
   agreementPdfBuffer: Buffer
-): Promise<{ prUrl: string; folderUrl: string; agreementUrl: string }> {
+): Promise<{ prUrl: string; folderUrl: string; folderId: string; agreementUrl: string }> {
   const agentFolderId = await getOrCreateAgentFolder(deal.agentName);
   const leadFolder = await getOrCreateLeadFolder(agentFolderId, deal.customerName);
 
   // 1. Pasang shortcut dokumen agen (No Rekening, NPWP, KTP) ke folder nasabah
-  await attachAgentDocShortcuts(agentFolderId, leadFolder.id);
+  try {
+    await attachAgentDocShortcuts(agentFolderId, leadFolder.id);
+  } catch (e: any) {
+    console.warn(`Peringatan: Gagal pasang shortcut dokumen agen:`, e.message);
+  }
 
   // 2. Pasang shortcut berkas PKS Bank ke folder nasabah
-  await attachBankPKSShortcut(deal.bank, leadFolder.id);
+  try {
+    await attachBankPKSShortcut(deal.bank, leadFolder.id);
+  } catch (e: any) {
+    console.warn(`Peringatan: Gagal pasang shortcut PKS bank:`, e.message);
+  }
 
-  // 3. Salin/perbarui berkas PR Request spreadsheet di folder nasabah
-  const prResult = await syncPRSpreadsheetInDrive(deal, leadFolder.id, leadFolder.url);
+  let prUrl = '';
+  try {
+    const prResult = await syncPRSpreadsheetInDrive(deal, leadFolder.id, leadFolder.url);
+    prUrl = prResult.prUrl || '';
+  } catch (e: any) {
+    console.warn(`Direct sync PR spreadsheet via SA skipped (quota/permissions):`, e.message);
+  }
 
-  // 4. Unggah berkas Agreement Pembagian Komisi Agent PDF 4 Halaman Utuh
-  const agreementResult = await uploadAgreementPdfToDrive(deal, agreementPdfBuffer, leadFolder.id);
+  let agreementUrl = '';
+  try {
+    const agreementResult = await uploadAgreementPdfToDrive(deal, agreementPdfBuffer, leadFolder.id);
+    agreementUrl = agreementResult.webViewLink || '';
+  } catch (e: any) {
+    console.warn(`Direct upload Agreement PDF via SA skipped (quota/permissions):`, e.message);
+  }
 
   return {
-    prUrl: prResult.prUrl,
+    prUrl,
     folderUrl: leadFolder.url,
-    agreementUrl: agreementResult.webViewLink
+    folderId: leadFolder.id,
+    agreementUrl
   };
 }
 
