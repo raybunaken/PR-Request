@@ -1,21 +1,29 @@
 /**
- * GOOGLE APPS SCRIPT - KPR MORTGAGE OPERATIONS AUTOMATION
+ * ============================================================================
+ * UNIFIED GOOGLE APPS SCRIPT - 99 GROUP KPR OPERATIONS SUITE
  * Akun Eksekusi: dzaky.rayssa@99.co
- *
- * Fitur:
- * 1. Otomasi penarikan file SPA (Surat Perjanjian Kerjasama) final signed dari Gmail (Dropbox Sign / 99 Group)
- *    dan penyimpanan otomatis ke folder Leads di Google Drive.
- * 2. Otomasi pencarian thread email Konfirmasi Plafond Bank, konversi thread email menjadi PDF persis format
- *    cetak native Gmail (Gmail Print to PDF) dengan logo 99 Group resmi.
- * 3. Fallback pencarian cerdas berbasis token/nama nasabah untuk mengantisipasi perbedaan ejaan nama (Case 1).
+ * ============================================================================
+ * 
+ * Skrip terpadu untuk:
+ * 1. PR Request & Agreement Generator:
+ *    - Menyalin template resmi Google Spreadsheet PR Request native (Bukan .xlsx)
+ *    - Mengunggah Agreement Komisi Agen PDF 4 halaman
+ *    - Memastikan shortcut PKS Bank terpasang
+ * 2. Leads Folder File Automation:
+ *    - Menarik SPA signed attachment dari Gmail ke folder Leads nasabah
+ *    - Menarik email konfirmasi plafond/akad dari PIC Bank dan merender ke PDF
+ *      dengan format native print Gmail resmi 99 Group
+ *    - Membersihkan berkas salah tempat secara otomatis
  */
+
+var TEMPLATE_PR_ID = "1QlRwxUp9taMCfYLqwOxfEShTGGIX3Btat2GsI_GOqtQ";
 
 function doGet(e) {
   var result = {
-    status: 'ok',
-    service: 'KPR SPA and Bank Email Automation',
+    status: "ok",
+    service: "Unified KPR Operations Suite (PR & Leads Automation)",
     account: Session.getActiveUser().getEmail(),
-    timestamp: new Date().toISOString()
+    time: new Date().toISOString()
   };
   return ContentService.createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.JSON);
@@ -26,16 +34,17 @@ function doPost(e) {
   try {
     var raw = (e && e.postData && e.postData.contents) ? e.postData.contents : '{}';
     var payload = JSON.parse(raw);
-    var action = payload.action || '';
+    var action = (payload.action || '').trim().toLowerCase();
 
     if (action === 'ping') {
       responseData = {
         success: true,
-        message: 'Apps Script Web App aktif dan terhubung.',
+        message: 'Unified Apps Script Web App aktif dan terhubung.',
         account: Session.getActiveUser().getEmail(),
         timestamp: new Date().toISOString()
       };
     } else if (action === 'fetch_spa_and_email' || action === 'fetch_files') {
+      // ROUTE 1: Penarikan berkas Leads (SPA Signed + Email Konfirmasi Bank)
       responseData = executeFetchSpaAndBankEmail(
         payload.folderId,
         payload.customerName,
@@ -44,17 +53,13 @@ function doPost(e) {
         payload.customSpaQuery,
         payload.customBankQuery
       );
-    } else if (payload.row) {
-      responseData = {
-        success: true,
-        message: 'Row ' + payload.row + ' diterima via Apps Script.',
-        row: payload.row
-      };
+    } else if (action === 'create_pr_and_agreement' || payload.amount || payload.agentName || payload.prFileName) {
+      // ROUTE 2: Pembuatan PR Request & Upload Agreement PDF
+      responseData = executeCreatePRAndAgreement(payload);
     } else {
       responseData = {
-        success: true,
-        message: 'Apps Script Web App menerima request tanpa aksi spesifik.',
-        receivedPayload: payload
+        success: false,
+        error: 'Aksi tidak valid atau parameter tidak lengkap. Gunakan action: "fetch_spa_and_email" atau kirim data PR.'
       };
     }
   } catch (err) {
@@ -70,7 +75,130 @@ function doPost(e) {
 }
 
 /**
- * Eksekusi utama penarikan berkas SPA dan Email Konfirmasi Bank
+ * ============================================================================
+ * BAGIAN 1: PEMBUATAN PR REQUEST SPREADSHEET & AGREEMENT PDF
+ * ============================================================================
+ */
+function executeCreatePRAndAgreement(data) {
+  if (!data.folderId) {
+    return { success: false, error: "Parameter folderId tidak ditemukan" };
+  }
+
+  var folder = DriveApp.getFolderById(data.folderId);
+  var result = { success: true };
+
+  // 1. Bersihkan berkas PR Request atau Agreement lama di folder PR ini agar tidak duplikat
+  var files = folder.getFiles();
+  while (files.hasNext()) {
+    var f = files.next();
+    var fname = f.getName().toLowerCase();
+    if (fname.indexOf('pr request') !== -1 || fname.indexOf('agreement') !== -1) {
+      f.setTrashed(true);
+    }
+  }
+
+  // 2. Buat Spreadsheet PR Request NATIVE dari Template Resmi Google Spreadsheet (Bukan .xlsx)
+  var prName = data.prFileName || ("PR Request - Referral Fee Agent a.n. " + (data.agentName || 'Agent') + " - " + (data.customerName || 'Customer'));
+  prName = prName.replace(/\.xlsx$/i, '');
+
+  var template = DriveApp.getFileById(TEMPLATE_PR_ID);
+  var newPrFile = template.makeCopy(prName, folder);
+  var newSs = SpreadsheetApp.openById(newPrFile.getId());
+  var prSheet = newSs.getSheetByName("PR Request") || newSs.getSheets()[0];
+
+  // Isi sel PR Request
+  var now = new Date();
+  var dateStr = Utilities.formatDate(now, Session.getScriptTimeZone() || 'Asia/Jakarta', 'M/d/yy');
+  prSheet.getRange('G11').setValue(dateStr);
+  prSheet.getRange('D12').setValue(data.company || 'PT. Web Marketing Indonesia');
+  prSheet.getRange('D13').setValue('Fransisca Octarina');
+  prSheet.getRange('D14').setValue('CEO Team');
+  prSheet.getRange('D15').setValue('Referral Fee Agent ' + (data.agentPayeeName || data.agentName || ''));
+  prSheet.getRange('D17').setValue(data.agentPayeeName || data.agentName || '');
+  prSheet.getRange('D19').setValue(data.agentBankName || '');
+  prSheet.getRange('D20').setValue(data.agentAccountNumber || '');
+  prSheet.getRange('D21').setValue(data.agentAccountName || data.agentPayeeName || data.agentName || '');
+
+  var amountNum = Number(data.amount) || 0;
+  prSheet.getRange('D22').setValue(amountNum);
+
+  prSheet.getRange('C25').setValue('Mortgage - Agent transaction\nCommission sharing a.n. ' + (data.customerName || ''));
+  prSheet.getRange('F25').setValue('Cost Mortgage - Agent Transaction');
+  prSheet.getRange('G25').setFormula('=D22');
+  prSheet.getRange('G32').setFormula('=G25');
+
+  var richLink = SpreadsheetApp.newRichTextValue()
+    .setText(data.customerName || 'Folder Drive')
+    .setLinkUrl(folder.getUrl())
+    .build();
+  prSheet.getRange('D34').setRichTextValue(richLink);
+
+  prSheet.getRange('B38').setValue('Fransisca Octarina');
+  prSheet.getRange('D38').setValue('Cheung Yik');
+
+  SpreadsheetApp.flush();
+
+  result.prUrl = newPrFile.getUrl();
+  result.prId = newPrFile.getId();
+
+  // 3. Simpan Agreement PDF (.pdf 4 Halaman Utuh)
+  if (data.agreementBase64 && data.agreementFileName) {
+    var agrBlob = Utilities.newBlob(
+      Utilities.base64Decode(data.agreementBase64),
+      'application/pdf',
+      data.agreementFileName
+    );
+    var agrFile = folder.createFile(agrBlob);
+    result.agreementUrl = agrFile.getUrl();
+    result.agreementId = agrFile.getId();
+  }
+
+  // 4. Pastikan berkas PKS Bank ada di folder nasabah jika belum ada
+  if (data.bankName) {
+    var hasPks = false;
+    var currentFiles = folder.getFiles();
+    while (currentFiles.hasNext()) {
+      if (currentFiles.next().getName().toLowerCase().indexOf('pks') !== -1) {
+        hasPks = true;
+        break;
+      }
+    }
+    if (!hasPks) {
+      var rawBank = (data.bankName || '').toLowerCase().trim();
+      var bankKeywords = ['danamon', 'sinarmas', 'maybank', 'permata', 'muamalat', 'mandiri', 'ganesha', 'cimb', 'uob', 'bsi', 'ina'];
+      var targetKeyword = '';
+      for (var k = 0; k < bankKeywords.length; k++) {
+        if (rawBank.indexOf(bankKeywords[k]) !== -1) {
+          targetKeyword = bankKeywords[k];
+          break;
+        }
+      }
+      if (targetKeyword) {
+        var pksFiles = DriveApp.searchFiles("title contains 'PKS' and trashed = false");
+        while (pksFiles.hasNext()) {
+          var pf = pksFiles.next();
+          var pfName = pf.getName().toLowerCase();
+          if (targetKeyword === 'ina') {
+            if (/\bina\b/i.test(pfName) && pfName.indexOf('sinarmas') === -1) {
+              pf.makeCopy(pf.getName(), folder);
+              break;
+            }
+          } else if (pfName.indexOf(targetKeyword) !== -1) {
+            pf.makeCopy(pf.getName(), folder);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * ============================================================================
+ * BAGIAN 2: PENARIKAN BERKAS LEADS (SPA SIGNED + EMAIL KONFIRMASI BANK)
+ * ============================================================================
  */
 function executeFetchSpaAndBankEmail(folderId, customerName, bankName, moCode, customSpaQuery, customBankQuery) {
   if (!folderId) {
@@ -87,14 +215,28 @@ function executeFetchSpaAndBankEmail(folderId, customerName, bankName, moCode, c
     return { success: false, error: 'Folder Google Drive tidak ditemukan dengan ID: ' + folderId };
   }
 
+  // 1. Bersihkan berkas PR Request yang tidak sengaja terbuat di folder Leads ini
+  try {
+    var cFiles = targetFolder.getFiles();
+    while (cFiles.hasNext()) {
+      var cf = cFiles.next();
+      var cfName = cf.getName().toLowerCase();
+      if (cfName.indexOf('pr request') !== -1 || (cfName.indexOf('agreement pembagian komisi') !== -1)) {
+        cf.setTrashed(true);
+      }
+    }
+  } catch (cleanErr) {
+    Logger.log('Gagal membersihkan file PR nyasar: ' + cleanErr.message);
+  }
+
   var custClean = String(customerName || '').trim();
   var bankClean = String(bankName || '').trim();
   var moClean = String(moCode || '').trim();
 
-  // 1. Ambil SPA Signed Attachment
+  // 2. Ambil SPA Signed Attachment
   var spaResult = fetchSpaSignedAttachment(targetFolder, custClean, bankClean, customSpaQuery);
 
-  // 2. Ambil Email Konfirmasi Bank & Render ke PDF (Persis format cetak Gmail asli)
+  // 3. Ambil Email Konfirmasi Bank & Render ke PDF (Persis format cetak Gmail asli)
   var bankEmailResult = fetchBankEmailAndExportPdf(targetFolder, custClean, bankClean, moClean, customBankQuery);
 
   return {
@@ -165,7 +307,6 @@ function fetchSpaSignedAttachment(targetFolder, customerName, bankName, customQu
           var subject = msg.getSubject() || '';
           var subLower = subject.toLowerCase();
 
-          // Abaikan email notifikasi in-progress atau viewing
           if (subLower.indexOf('has viewed') !== -1 ||
               subLower.indexOf('has started') !== -1 ||
               subLower.indexOf('invitation to sign') !== -1) {
@@ -220,7 +361,6 @@ function fetchSpaSignedAttachment(targetFolder, customerName, bankName, customQu
 
   var targetFileName = 'SPA_' + customerName.replace(/[/\\?%*:|"<>]/g, '').trim() + '.pdf';
 
-  // Hapus berkas lama jika ada untuk mencegah korupsi file binary dan mencegah duplikasi
   var existingFiles = targetFolder.getFilesByName(targetFileName);
   while (existingFiles.hasNext()) {
     existingFiles.next().setTrashed(true);
@@ -258,29 +398,35 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
     queries.push(customQuery.trim());
   }
 
-  // Tier 1: Subjek "Konfirmasi" / "Konfirmasi plafond" + Bank + Nama Nasabah
+  // Tier 1: Pencarian komprehensif subjek konfirmasi / konfirmasi plafond + bank + nasabah
   if (bankWord) {
     queries.push('subject:"Konfirmasi" "' + bankWord + '" "' + cleanNameOnly + '"' + antiFilters);
     queries.push('subject:"Konfirmasi plafond" "' + bankWord + '" "' + cleanNameOnly + '"' + antiFilters);
+    queries.push('"' + cleanNameOnly + '" "' + bankWord + '" "konfirmasi"' + antiFilters);
+    queries.push('"' + cleanNameOnly + '" "' + bankWord + '" "plafond"' + antiFilters);
   }
   queries.push('subject:"Konfirmasi" "' + cleanNameOnly + '"' + antiFilters);
   queries.push('subject:"Konfirmasi plafond" "' + cleanNameOnly + '"' + antiFilters);
+  queries.push('"' + cleanNameOnly + '" "konfirmasi" "plafond"' + antiFilters);
 
   // Tier 2: Subjek "Konfirmasi" + Bank + Kata Kunci Nasabah
   if (words.length >= 1) {
     if (bankWord) {
       queries.push('subject:"Konfirmasi" "' + bankWord + '" "' + words[0] + '"' + antiFilters);
       queries.push('subject:"Konfirmasi plafond" "' + bankWord + '" "' + words[0] + '"' + antiFilters);
+      queries.push('"' + words[0] + '" "' + bankWord + '" "konfirmasi"' + antiFilters);
     }
     queries.push('subject:"Konfirmasi" "' + words[0] + '"' + antiFilters);
     queries.push('subject:"Konfirmasi plafond" "' + words[0] + '"' + antiFilters);
   }
 
-  // Tier 3: Body pencarian ketat yang wajib memuat kata "konfirmasi" dan "plafond" / "done akad"
-  queries.push('"' + cleanNameOnly + '" "konfirmasi" "plafond"' + antiFilters);
+  // Tier 3: Body pencarian ketat
   queries.push('"' + cleanNameOnly + '" "done akad"' + antiFilters);
   if (words.length >= 2) {
     queries.push('"' + words[0] + '" "' + words[1] + '" "konfirmasi" "plafond"' + antiFilters);
+    if (bankWord) {
+      queries.push('"' + words[0] + '" "' + words[1] + '" "' + bankWord + '"' + antiFilters);
+    }
   }
 
   var matchedThread = null;
@@ -338,12 +484,11 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
             hasBankOrExternalReply = true;
           }
 
-          // Verifikasi nasabah disebut dalam email secara spesifik (BUKAN hanya 1 kata nama depan yang bisa bentrok dengan nama PIC Bank)
+          // Verifikasi nasabah disebut dalam email secara spesifik
           var custLower = cleanNameOnly.toLowerCase();
           if (sub.indexOf(custLower) !== -1 || body.indexOf(custLower) !== -1) {
             mentionsCust = true;
           } else if (words.length >= 2) {
-            // Wajib mencocokkan minimal 2 kata dari nama nasabah (misal: "Dedi" dan "Sugiharto")
             var matchedWordCount = 0;
             for (var wIdx = 0; wIdx < words.length; wIdx++) {
               if (body.indexOf(words[wIdx].toLowerCase()) !== -1 || sub.indexOf(words[wIdx].toLowerCase()) !== -1) {
@@ -370,7 +515,7 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
                                   threadText.indexOf('sp3k') !== -1 ||
                                   threadText.indexOf('offering letter') !== -1;
 
-        // Validasi kesesuaian Bank: Tolak jika email jelas-jelas ditujukan ke bank lain (misal mencari BSI tetapi email tentang CIMB Niaga)
+        // Validasi kesesuaian Bank
         if (bankWord) {
           var bwLower = bankWord.toLowerCase();
           var bankKeywords = ['danamon', 'cimb', 'mandiri', 'permata', 'uob', 'bsi', 'maybank', 'sinarmas', 'muamalat', 'bca', 'btn', 'bri', 'bni', 'hana'];
@@ -378,15 +523,10 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
           var hasTargetBank = threadText.indexOf(bwLower) !== -1;
           var hasOtherBankOnly = otherBanks.some(function(b) { return threadText.indexOf(b) !== -1; }) && !hasTargetBank;
           if (hasOtherBankOnly) {
-            continue; // Abaikan thread bank lain
+            continue;
           }
         }
 
-        // Syarat thread valid:
-        // 1. Menyebut nama nasabah secara valid (bukan sekadar nama depan PIC bank di to/cc)
-        // 2. Membahas konfirmasi / plafond / akad
-        // 3. Bank sesuai
-        // 4. Ada balasan / respon dari PIC Bank (bukan hanya email keluar dari Dzaky yang belum dibalas)
         if (mentionsCust && isConfirmationTopic && (hasBankOrExternalReply || (customQuery && customQuery.trim()))) {
           matchedThread = th;
           queryUsed = q;
@@ -434,7 +574,6 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
   html += '.msg-body p { margin: 0 0 10px 0; }';
   html += '</style></head><body>';
 
-  // 1. Top Header (Logo 99 GROUP di kiri, Mail info di kanan)
   html += '<table class="header-table"><tr>';
   html += '<td style="vertical-align: top;">';
   html += '<span class="logo-text">99</span><span class="logo-sub"> GROUP</span>';
@@ -444,12 +583,10 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
   html += 'Dzaky Rayssa Buntoro &lt;' + escapeHtml(userEmail) + '&gt;';
   html += '</td></tr></table>';
 
-  // 2. Thread Title & Message Count
   html += '<div class="subject-title">' + escapeHtml(threadSubject) + '</div>';
   html += '<div class="message-count">' + messages.length + ' messages</div>';
   html += '<hr class="main-divider" />';
 
-  // 3. Messages List
   for (var mIdx = 0; mIdx < messages.length; mIdx++) {
     var curMsg = messages[mIdx];
     var fromStr = curMsg.getFrom() || '';
@@ -485,7 +622,6 @@ function fetchBankEmailAndExportPdf(targetFolder, customerName, bankName, moCode
   var htmlBlob = Utilities.newBlob(html, 'text/html', 'email_thread.html');
   var pdfBlob = htmlBlob.getAs('application/pdf').setName(targetFileName);
 
-  // Hapus berkas lama jika ada untuk mencegah korupsi file binary dan mencegah duplikasi
   var existingFiles = targetFolder.getFilesByName(targetFileName);
   while (existingFiles.hasNext()) {
     existingFiles.next().setTrashed(true);
@@ -522,19 +658,4 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-/**
- * Fungsi uji coba (bisa dijalankan langsung di Apps Script Editor untuk verifikasi otorisasi)
- */
-function testSearch() {
-  var testCustomer = "PT Sinergi Lintas Global";
-  var testBank = "Danamon";
-  Logger.log("Testing search for: " + testCustomer + " - " + testBank);
-
-  var threads = GmailApp.search('"SPA" "' + testCustomer + '"', 0, 5);
-  Logger.log("Found threads: " + threads.length);
-  for (var i = 0; i < threads.length; i++) {
-    Logger.log("Thread " + (i + 1) + ": " + threads[i].getFirstMessageSubject());
-  }
 }

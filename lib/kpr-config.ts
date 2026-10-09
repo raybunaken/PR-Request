@@ -30,7 +30,7 @@ export const KPR_CONFIG = {
   REQUESTER_DEPT: 'CEO Team',
   APPROVER_BU_HEAD: 'Cheung Yik',
 
-  // 3 Master Data Agen Aktif
+  // 4 Master Data Agen Aktif
   AGENTS: {
     85: {
       code: 'Irene',
@@ -55,6 +55,14 @@ export const KPR_CONFIG = {
       bankName: 'BCA',
       accountNumber: '6871960868',
       accountName: 'Juneth Andriani'
+    },
+    50: {
+      code: 'Sarahati',
+      name: 'Sarahati Br Tarigan',
+      payeeName: 'Sarahati Br Tarigan',
+      bankName: 'BCA',
+      accountNumber: '5255441105',
+      accountName: 'Sarahati Br Tarigan'
     }
   } as Record<number, AgentConfig>,
 
@@ -121,6 +129,7 @@ export function resolveAgent(percentageVal: any, agentNameHint?: string): AgentC
     const hint = agentNameHint.toLowerCase();
     if (hint.includes('sudiyono')) return KPR_CONFIG.AGENTS[90];
     if (hint.includes('juneth')) return KPR_CONFIG.AGENTS[80];
+    if (hint.includes('sarahati') || hint.includes('tarigan')) return KPR_CONFIG.AGENTS[50];
     if (hint.includes('irene') || hint.includes('respati')) return KPR_CONFIG.AGENTS[85];
   }
 
@@ -135,6 +144,7 @@ export function resolveAgent(percentageVal: any, agentNameHint?: string): AgentC
 
   if (num === 90) return KPR_CONFIG.AGENTS[90];
   if (num === 80) return KPR_CONFIG.AGENTS[80];
+  if (num === 50) return KPR_CONFIG.AGENTS[50];
   return KPR_CONFIG.AGENTS[85];
 }
 

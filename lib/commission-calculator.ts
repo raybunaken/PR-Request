@@ -65,8 +65,8 @@ export function calculateSmartCommission(rowValues: any[]): SmartCommissionResul
     
     // Bank yang membebankan biaya transfer antar-bank ke rekening penampung kita (Danamon, INA, Bukopin, UOB)
     if (bankName.includes('danamon') || bankName.includes('ina') || bankName.includes('bukopin') || bankName.includes('uob')) {
-      // Dewi Suyenti: 2 transaksi (Takeover + Topup) -> 2 x Rp 2.900 = Rp 5.800 * 90% = Rp 5.220
-      const numTrx = custName.includes('dewi suyenti') ? 2 : 1;
+      // Dewi Suyenti & Andre Wilson Siregar: 2 transaksi/potongan Danamon ganda -> 2 x Rp 2.900 = Rp 5.800 * 85%/90%
+      const numTrx = custName.includes('dewi suyenti') || custName.includes('andre wilson') ? 2 : 1;
       const bankFeeDeduction = Math.round(numTrx * 2900 * pctVal);
       finalAmount = finalAmount - bankFeeDeduction;
     }

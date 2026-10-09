@@ -131,14 +131,16 @@ export async function POST(req: NextRequest) {
         }
 
         // 4. Update Controller Sheet (Row & Partner Row jika ada)
-        // Menyimpan rumus HYPERLINK ke Folder PR di Drive (agar attachment & dokumen lengkap langsung dapat diperiksa), entitas PT, dan nominal
+        // Menyimpan rumus HYPERLINK ke PR Request Spreadsheet di Drive, entitas PT, nominal, dan rekam di Riwayat
         await updateRowStatusInController(
           deal.row,
           deal.partnerRow,
-          folderUrl || prUrl,
+          folderUrl,
           deal.company,
           deal.targetAmount,
-          prUrl
+          prUrl,
+          deal.customerName,
+          deal.agentName
         );
 
         const downloadPrUrl = `/api/download?row=${deal.row}&type=pr`;

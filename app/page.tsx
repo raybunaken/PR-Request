@@ -322,17 +322,25 @@ export default function DashboardPage() {
       folderUrl?: string;
     }>
   ): string => {
-    const chunks: string[] = ['payment to agent', ''];
+    const chunks: string[] = ['payment to agent:', ''];
 
     items.forEach((item, index) => {
       chunks.push(item.customerName);
       chunks.push(item.agentName || 'Agent KPR');
       chunks.push('');
       chunks.push('PR Request:');
-      chunks.push(item.prUrl || '-');
+      
+      // Validasi ketat: PR Request harus berupa Google Spreadsheet, bukan folder
+      let cleanPrUrl = (item.prUrl || '').trim();
+      if (cleanPrUrl.includes('/drive/folders/')) {
+        cleanPrUrl = '';
+      }
+      chunks.push(cleanPrUrl || '(Belum digenerate)');
       chunks.push('');
       chunks.push('Folder:');
-      chunks.push(item.folderUrl || '-');
+      
+      let cleanFolderUrl = (item.folderUrl || '').trim();
+      chunks.push(cleanFolderUrl || '(Belum ada folder)');
 
       if (index < items.length - 1) {
         chunks.push('');
@@ -375,8 +383,8 @@ export default function DashboardPage() {
       selectedDeals.map(d => ({
         customerName: d.customerName,
         agentName: d.agentName || resolveAgent(d.percentage).name,
-        prUrl: d.prFileUrl || d.prFolderUrl,
-        folderUrl: d.prFolderUrl || d.prFileUrl
+        prUrl: d.prFileUrl,
+        folderUrl: d.prFolderUrl
       }))
     );
     await copyToClipboard(text);

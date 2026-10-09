@@ -232,6 +232,80 @@ async function autoSyncControllerFromAkad(
   return ctrlRows;
 }
 
+/**
+ * Memuat riwayat PR Request dan Google Drive Folder secara komprehensif
+ * dari tab 'Riwayat PR Generated' dan Google Drive
+ */
+async function loadComprehensivePRHistory(sheets: any): Promise<Record<string, { prUrl: string; folderUrl: string }>> {
+  const map: Record<string, { prUrl: string; folderUrl: string }> = {};
+
+  // 1. Ambil data dari sheet 'Riwayat PR Generated'
+  try {
+    const riwayatRes = await sheets.spreadsheets.get({
+      spreadsheetId: KPR_CONFIG.CONTROLLER_SPREADSHEET_ID,
+      ranges: ["'Riwayat PR Generated'!A2:H200"],
+      fields: 'sheets(data(rowData(values(formattedValue,hyperlink))))'
+    });
+    const riwayatRows = riwayatRes.data.sheets?.[0]?.data?.[0]?.rowData || [];
+    for (const r of riwayatRows) {
+      const vals = r.values || [];
+      const cust = vals[1]?.formattedValue ? String(vals[1].formattedValue).trim() : '';
+      const prLink = vals[6]?.hyperlink || vals[6]?.formattedValue || '';
+      const fLink = vals[7]?.hyperlink || vals[7]?.formattedValue || '';
+      if (cust) {
+        const k = normalizeName(cust);
+        const cleanPr = String(prLink).startsWith('http') && !String(prLink).includes('/drive/folders/') ? String(prLink) : '';
+        const cleanF = String(fLink).startsWith('http') ? String(fLink) : '';
+        if (!map[k]) {
+          map[k] = { prUrl: cleanPr, folderUrl: cleanF };
+        } else {
+          if (!map[k].prUrl && cleanPr) map[k].prUrl = cleanPr;
+          if (!map[k].folderUrl && cleanF) map[k].folderUrl = cleanF;
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn('[PR History] Peringatan: Gagal membaca riwayat PR:', err.message);
+  }
+
+  // 2. Ambil berkas PR Request langsung dari Google Drive untuk nasabah yang sudah dibuatkan PR
+  try {
+    const auth = getGoogleAuth();
+    const drive = google.drive({ version: 'v3', auth });
+    const driveRes = await drive.files.list({
+      q: "mimeType = 'application/vnd.google-apps.spreadsheet' and name contains 'PR Request' and trashed = false",
+      fields: 'files(id, name, webViewLink, parents)',
+      pageSize: 200
+    });
+    const driveFiles = driveRes.data.files || [];
+    for (const f of driveFiles) {
+      const m = (f.name || '').match(/-\s*([^-\n]+)$/);
+      if (m && m[1]) {
+        const custNorm = normalizeName(m[1]);
+        const prUrl = f.webViewLink || `https://docs.google.com/spreadsheets/d/${f.id}/edit`;
+        const folderUrl = f.parents && f.parents[0] ? `https://drive.google.com/drive/folders/${f.parents[0]}` : '';
+        const isCurrentUndefined = (map[custNorm]?.prUrl || '').includes('undefined');
+        const isNewBetter = !(f.name || '').includes('undefined');
+
+        if (!map[custNorm]) {
+          map[custNorm] = { prUrl, folderUrl };
+        } else {
+          if (!map[custNorm].prUrl || (isCurrentUndefined && isNewBetter)) {
+            map[custNorm].prUrl = prUrl;
+          }
+          if (!map[custNorm].folderUrl && folderUrl) {
+            map[custNorm].folderUrl = folderUrl;
+          }
+        }
+      }
+    }
+  } catch (driveErr: any) {
+    console.warn('[PR History] Peringatan: Gagal memuat daftar PR dari Drive:', driveErr.message);
+  }
+
+  return map;
+}
+
 export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<DealItem[]> {
   const sheets = await getSheetsService();
 
@@ -254,6 +328,9 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
 
   // 3. Otomatis sinkronkan transaksi terbaru dari Database Utama jika ada baris transaksi baru
   ctrlRows = await autoSyncControllerFromAkad(sheets, ctrlRows, dbRows);
+
+  // 4. Muat riwayat lengkap PR Spreadsheet dan Google Drive Folder
+  const prHistoryMap = await loadComprehensivePRHistory(sheets);
 
   const dealsMap: Record<string, DealItem> = {};
 
@@ -330,6 +407,8 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
     if (isBtn && !isDirect) {
       if (custKey.includes('erik')) targetAmount = 4713514;
       else if (custKey.includes('yulia')) targetAmount = 33200954;
+    } else if (custKey.includes('andre wilson')) {
+      targetAmount = 6052805;
     }
 
     // Ekstrak URL folder leads dari Kolom J Controller
@@ -337,15 +416,18 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
     let hasLeadsFolder = !!leadsFolderUrl || !!dbLeadsFolder;
     let leadsFolderName = moCode ? `${moCode} - ${cust}` : (dbLeadsFolder || cust);
 
-    // Ekstrak URL dari Kolom K Controller (Status PR / Folder PR)
+    // Resolusi URL PR Spreadsheet dan Folder dari Riwayat / Google Drive
+    const historyItem = prHistoryMap[custKey];
+    let prFolderUrl = historyItem?.folderUrl || '';
+    let prFileUrl = historyItem?.prUrl || '';
+
+    // Ekstrak URL dari Kolom K Controller jika belum ditemukan
     const colKUrl = extractHyperlinkUrl(statusColK);
-    let prFolderUrl = '';
-    let prFileUrl = '';
     if (colKUrl) {
       if (colKUrl.includes('/drive/folders/')) {
-        prFolderUrl = colKUrl;
-      } else {
-        prFileUrl = colKUrl;
+        if (!prFolderUrl) prFolderUrl = colKUrl;
+      } else if (colKUrl.includes('/spreadsheets/d/')) {
+        if (!prFileUrl) prFileUrl = colKUrl;
       }
     }
 
@@ -353,7 +435,7 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
     let syncStatus: 'SINKRON' | 'PERLU_TIMPA' | 'BELUM_ADA' = 'BELUM_ADA';
     const statusLower = statusColK.toLowerCase();
 
-    if (statusLower.includes('ditimpa') || statusLower.includes('sinkron')) {
+    if (prFileUrl || statusLower.includes('ditimpa') || statusLower.includes('sinkron')) {
       syncStatus = 'SINKRON';
     } else if (statusLower.includes('sudah ada pr')) {
       if (custKey.includes('dewi suyenti') || custKey.includes('sinergi lintas global')) {
@@ -438,12 +520,14 @@ export async function updateRowStatusInController(
   folderUrl?: string,
   company?: string,
   amount?: number,
-  prUrl?: string
+  prUrl?: string,
+  customerName?: string,
+  agentName?: string
 ) {
   const sheets = await getSheetsService();
 
-  // Prioritas hyperlink: Folder PR Nasabah di Drive (sehingga attachment & dokumen bisa langsung diperiksa)
-  const targetLink = folderUrl || prUrl || '';
+  // Prioritas hyperlink: PR Spreadsheet (agar Link PR mengarah ke file PR Request, bukan folder)
+  const targetLink = prUrl || folderUrl || '';
   const statusValue = targetLink ? `=HYPERLINK("${targetLink}", "🟢 Ditimpa")` : '🟢 Ditimpa';
 
   const requests: { range: string; values: any[][] }[] = [
@@ -493,6 +577,38 @@ export async function updateRowStatusInController(
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: req.values }
     });
+  }
+
+  // Rekam ke sheet 'Riwayat PR Generated'
+  if (customerName && (prUrl || folderUrl)) {
+    try {
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+      const prFormula = prUrl ? `=HYPERLINK("${prUrl}", "Buka PR")` : '';
+      const folderFormula = folderUrl ? `=HYPERLINK("${folderUrl}", "Buka Folder")` : '';
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: KPR_CONFIG.CONTROLLER_SPREADSHEET_ID,
+        range: "'Riwayat PR Generated'!A:H",
+        valueInputOption: 'USER_ENTERED',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: {
+          values: [
+            [
+              dateStr,
+              customerName,
+              agentName || 'Agent KPR',
+              company || '',
+              amount || 0,
+              'Ditimpa/Diperbarui',
+              prFormula,
+              folderFormula
+            ]
+          ]
+        }
+      });
+    } catch (err: any) {
+      console.warn('[Log Riwayat] Peringatan: Gagal mencatat riwayat PR:', err.message);
+    }
   }
 }
 
