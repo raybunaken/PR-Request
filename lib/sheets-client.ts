@@ -409,6 +409,10 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
       else if (custKey.includes('yulia')) targetAmount = 33200954;
     } else if (custKey.includes('andre wilson')) {
       targetAmount = 6052805;
+    } else if (custKey.includes('septa')) {
+      targetAmount = 6043842;
+    } else if (custKey.includes('qodri')) {
+      targetAmount = 1104730;
     }
 
     // Ekstrak URL folder leads dari Kolom J Controller
