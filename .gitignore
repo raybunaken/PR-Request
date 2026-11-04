@@ -29,6 +29,7 @@ kpr-automation*.json
 # test artifacts
 test_*.pdf
 test_*.xlsx
+scripts/*.json
 
 # system
 .DS_Store

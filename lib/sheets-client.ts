@@ -341,12 +341,21 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
     const cust = String(r[1] || '').trim();
     const tglAkad = String(r[2] || '').trim();
     const bank = String(r[3] || '').trim();
-    const pct = String(r[4] || '').trim();
-    const comm = parseNumberClean(r[6]);
+    let pct = String(r[4] || '').trim();
+    let comm = parseNumberClean(r[6]);
     const leadsFolderColJ = String(r[9] || '').trim();
     const statusColK = String(r[10] || '').trim();
 
     if (!cust) continue;
+
+    // Sinkronisasi data persentase agen langsung dari DB Utama jika Controller masih tertinggal
+    if (dbRow > 1 && dbRows[dbRow - 1]) {
+      const dbRowValues = dbRows[dbRow - 1];
+      const dbPct = String(dbRowValues[17] || '').trim();
+      if (dbPct && dbPct !== '0%' && (!pct || pct === '0%')) {
+        pct = dbPct;
+      }
+    }
 
     const isDirect = comm === 0 && (statusColK.toLowerCase().includes('direct') || !pct || pct === '0%');
 
