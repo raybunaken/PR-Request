@@ -1,0 +1,67 @@
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+async function getAccessToken() {
+  const creds = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'kpr-automation.json'), 'utf8'));
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const claim = {
+    iss: creds.client_email,
+    scope: 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600,
+    iat: now
+  };
+  const enc = o => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const u = enc(header) + '.' + enc(claim);
+  const s = crypto.createSign('RSA-SHA256').update(u).sign(creds.private_key, 'base64url');
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: u + '.' + s })
+  });
+  return (await res.json()).access_token;
+}
+
+async function inspectSharedCashback() {
+  const token = await getAccessToken();
+
+  // Let's search for folder named 'Cashback' shared with service account
+  const q = encodeURIComponent(`mimeType = 'application/vnd.google-apps.folder' and name = 'Cashback' and trashed = false`);
+  const sRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,parents,webViewLink)`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const sData = await sRes.json();
+  console.log('Search for folder "Cashback":', sData);
+
+  if (sData.files && sData.files.length > 0) {
+    for (const folder of sData.files) {
+      console.log(`\n=== FOLDER CASHBACK [${folder.id}]: ${folder.name} ===`);
+      const listRes = await fetch(`https://www.googleapis.com/drive/v3/files?q='${folder.id}'+in+parents+and+trashed=false&fields=files(id,name,mimeType,webViewLink)&pageSize=50`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const listData = await listRes.json();
+      console.log('Items in Cashback folder:');
+      (listData.files || []).forEach(f => {
+        console.log(`  - [${f.mimeType === 'application/vnd.google-apps.folder' ? 'DIR' : 'FILE'}] ${f.name} (id: ${f.id})`);
+      });
+
+      // Find 'Memo' folder
+      const memoFolder = listData.files?.find(f => f.name.toLowerCase() === 'memo');
+      if (memoFolder) {
+        console.log(`\n=== FOUND MEMO FOLDER [${memoFolder.id}] ===`);
+        const mRes = await fetch(`https://www.googleapis.com/drive/v3/files?q='${memoFolder.id}'+in+parents+and+trashed=false&fields=files(id,name,mimeType,webViewLink)&pageSize=50`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const mData = await mRes.json();
+        console.log('Files inside Memo folder:');
+        (mData.files || []).forEach(mf => {
+          console.log(`    * ${mf.name} (id: ${mf.id}, mime: ${mf.mimeType}, link: ${mf.webViewLink})`);
+        });
+      }
+    }
+  }
+}
+
+inspectSharedCashback().catch(console.error);

@@ -31,10 +31,12 @@ import {
   ChevronDown,
   ChevronUp,
   Compass,
-  MessageSquare
+  MessageSquare,
+  Gift
 } from 'lucide-react';
 import Link from 'next/link';
 import AppSwitcher from '@/components/AppSwitcher';
+import CashbackTab from '@/components/CashbackTab';
 import { resolveAgent } from '@/lib/kpr-config';
 
 interface DealItem {
@@ -79,7 +81,7 @@ interface CompletedItem {
 }
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'PR_AGENT' | 'LEADS_FOLDER'>('PR_AGENT');
+  const [activeTab, setActiveTab] = useState<'PR_AGENT' | 'LEADS_FOLDER' | 'CASHBACK'>('PR_AGENT');
   const [deals, setDeals] = useState<DealItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +93,7 @@ export default function DashboardPage() {
   const [syncLeadsFolderWithPR, setSyncLeadsFolderWithPR] = useState<boolean>(true);
 
   // Tab Counts for badges
-  const [tabCounts, setTabCounts] = useState<{ agent: number; all: number }>({ agent: 0, all: 0 });
+  const [tabCounts, setTabCounts] = useState<{ agent: number; all: number; cashback: number }>({ agent: 0, all: 0, cashback: 0 });
 
   // Google Drive Status
   const [driveStatus, setDriveStatus] = useState<{
@@ -201,14 +203,26 @@ export default function DashboardPage() {
         }
       })
       .catch(() => {});
+
+    // Fetch 'cashback' count in background
+    fetch('/api/cashback')
+      .then(res => res.json())
+      .then(d => {
+        if (d.success) {
+          setTabCounts(prev => ({ ...prev, cashback: d.deals?.length || 0 }));
+        }
+      })
+      .catch(() => {});
   }, []);
 
-  const handleSwitchTab = (newTab: 'PR_AGENT' | 'LEADS_FOLDER') => {
+  const handleSwitchTab = (newTab: 'PR_AGENT' | 'LEADS_FOLDER' | 'CASHBACK') => {
     setActiveTab(newTab);
     setSelectedRows(new Set());
     setFilter('ALL');
     setSearchQuery('');
-    fetchDeals(newTab);
+    if (newTab !== 'CASHBACK') {
+      fetchDeals(newTab);
+    }
   };
 
   // Summary counts for Tab 1 (PR Agent)
@@ -816,6 +830,23 @@ export default function DashboardPage() {
               activeTab === 'LEADS_FOLDER' ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100 text-slate-600'
             }`}>
               {tabCounts.all || leadsSummary.total}
+            </span>
+          </button>
+
+          <button
+            onClick={() => handleSwitchTab('CASHBACK')}
+            className={`pb-3.5 px-2 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+              activeTab === 'CASHBACK'
+                ? 'border-emerald-600 text-emerald-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Gift className="w-4 h-4" />
+            <span>Cashback Promo Nasabah</span>
+            <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+              activeTab === 'CASHBACK' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+            }`}>
+              {tabCounts.cashback || 0}
             </span>
           </button>
         </div>
@@ -1595,6 +1626,13 @@ export default function DashboardPage() {
               </div>
             </div>
           </>
+        )}
+
+        {/* TAB 3: CASHBACK PROMO NASABAH */}
+        {activeTab === 'CASHBACK' && (
+          <CashbackTab
+            onCountUpdate={(count) => setTabCounts(prev => ({ ...prev, cashback: count }))}
+          />
         )}
       </main>
 
