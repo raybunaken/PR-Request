@@ -148,7 +148,8 @@ export default function DashboardPage() {
     items: []
   });
 
-  const fetchDeals = async (tabMode: 'PR_AGENT' | 'LEADS_FOLDER' = activeTab) => {
+  const fetchDeals = async (tabMode: 'PR_AGENT' | 'LEADS_FOLDER' | 'CASHBACK' = activeTab) => {
+    if (tabMode === 'CASHBACK') return;
     setLoading(true);
     setError(null);
     try {
