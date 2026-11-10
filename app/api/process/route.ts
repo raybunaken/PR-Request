@@ -4,10 +4,14 @@ import { generatePRExcelBuffer } from '@/lib/pr-builder';
 import { generateAgreementPdfBuffer } from '@/lib/agreement-builder';
 import { isDriveFolderAccessible, processDealDriveWorkflow, getOrCreateFinanceLeadFolder } from '@/lib/drive-client';
 import { KPR_CONFIG, resolveAgent } from '@/lib/kpr-config';
+import { enforceRateLimit } from '@/lib/rate-limiter';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
+  const rateLimitError = enforceRateLimit(req, 20);
+  if (rateLimitError) return rateLimitError;
+
   try {
     const body = await req.json();
     const deals: DealItem[] = body.deals || [];
@@ -69,6 +73,7 @@ export async function POST(req: NextRequest) {
                 method: 'POST',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify({
+                  secret: KPR_CONFIG.APPS_SCRIPT_SECRET || undefined,
                   folderId: targetFolderId,
                   customerName: deal.customerName,
                   company: deal.company,

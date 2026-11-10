@@ -28,6 +28,7 @@ export const KPR_CONFIG = {
   CASHBACK_MEMO_WMI_ID: '1U1bOFynz9sVFJSd6pFHkZ3E7c-bwEqIn',
   SERVICE_ACCOUNT_EMAIL: 'robot-kpr@kpr-automation.iam.gserviceaccount.com',
   APPS_SCRIPT_WEBAPP_URL: process.env.APPS_SCRIPT_WEBAPP_URL || 'https://script.google.com/macros/s/AKfycbxiBd3Cy5V3hpyqmr57u0m8P9_GTiWXsjx3Um31fMfOJiTGDHYSsuXx7VKOavBfjMm5fw/exec',
+  APPS_SCRIPT_SECRET: process.env.APPS_SCRIPT_SECRET || '',
 
   // Master Metadata
   REQUESTER_NAME: 'Fransisca Octarina',

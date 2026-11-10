@@ -37,7 +37,7 @@ import {
 import Link from 'next/link';
 import AppSwitcher from '@/components/AppSwitcher';
 import CashbackTab from '@/components/CashbackTab';
-import { resolveAgent } from '@/lib/kpr-config';
+import { getAgentDisplayName } from '@/lib/agent-client-utils';
 
 interface DealItem {
   row: number;
@@ -397,7 +397,7 @@ export default function DashboardPage() {
     const text = formatWhatsAppMessage(
       selectedDeals.map(d => ({
         customerName: d.customerName,
-        agentName: d.agentName || resolveAgent(d.percentage).name,
+        agentName: d.agentName || getAgentDisplayName(d.percentage),
         prUrl: d.prFileUrl,
         folderUrl: d.prFolderUrl
       }))
@@ -447,7 +447,7 @@ export default function DashboardPage() {
           const resObj = data.results?.[0];
           completed.push({
             name: item.customerName,
-            agentName: item.agentName || resolveAgent(item.percentage).name,
+            agentName: item.agentName || getAgentDisplayName(item.percentage),
             row: item.row,
             prUrl: resObj?.prUrl,
             folderUrl: resObj?.folderUrl,
@@ -504,7 +504,7 @@ export default function DashboardPage() {
           ...prev,
           completed: [{
             name: deal.customerName,
-            agentName: deal.agentName || resolveAgent(deal.percentage).name,
+            agentName: deal.agentName || getAgentDisplayName(deal.percentage),
             row: deal.row,
             prUrl: resObj?.prUrl,
             folderUrl: resObj?.folderUrl,

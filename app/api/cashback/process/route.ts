@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CashbackDealItem, processCashbackDealWorkflow } from '@/lib/cashback-client';
+import { enforceRateLimit } from '@/lib/rate-limiter';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
+  const rateLimitError = enforceRateLimit(req, 20);
+  if (rateLimitError) return rateLimitError;
+
   try {
     const body = await req.json();
     const deals: CashbackDealItem[] = body.deals || [];

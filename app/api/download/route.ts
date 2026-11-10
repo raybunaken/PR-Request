@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchAllDeals } from '@/lib/sheets-client';
 import { generatePRExcelBuffer } from '@/lib/pr-builder';
 import { generateAgreementPdfBuffer } from '@/lib/agreement-builder';
+import { enforceRateLimit } from '@/lib/rate-limiter';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
+  const rateLimitError = enforceRateLimit(req, 30);
+  if (rateLimitError) return rateLimitError;
+
   try {
     const { searchParams } = new URL(req.url);
     const rowParam = searchParams.get('row');

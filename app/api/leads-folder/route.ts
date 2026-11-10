@@ -2,10 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getOrCreateFinanceLeadFolder, checkFilesInLeadFolder } from '@/lib/drive-client';
 import { updateRowLeadsFolderInController } from '@/lib/sheets-client';
 import { KPR_CONFIG } from '@/lib/kpr-config';
+import { enforceRateLimit } from '@/lib/rate-limiter';
 
 export const dynamic = 'force-dynamic';
 
+function sanitizeSearchQuery(q?: string): string {
+  if (!q) return '';
+  const cleaned = String(q).trim();
+  if (/salary|password|rekening|secret|token|credential|tax|confidential/i.test(cleaned)) {
+    return '';
+  }
+  return cleaned.replace(/[^a-zA-Z0-9\s"'-]/g, '').slice(0, 100);
+}
+
 export async function GET(req: NextRequest) {
+  const rateLimitError = enforceRateLimit(req, 40);
+  if (rateLimitError) return rateLimitError;
+
   try {
     const { searchParams } = new URL(req.url);
     const folderId = searchParams.get('folderId');
@@ -22,6 +35,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const rateLimitError = enforceRateLimit(req, 20);
+  if (rateLimitError) return rateLimitError;
+
   try {
     const body = await req.json();
 
@@ -56,13 +72,14 @@ export async function POST(req: NextRequest) {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
+                secret: KPR_CONFIG.APPS_SCRIPT_SECRET || undefined,
                 action: 'fetch_spa_and_email',
                 folderId: folder.id,
                 customerName: customerName,
                 bankName: bankName || '',
                 moCode: moCode || '',
-                customSpaQuery: customSpaQuery || '',
-                customBankQuery: customBankQuery || ''
+                customSpaQuery: sanitizeSearchQuery(customSpaQuery),
+                customBankQuery: sanitizeSearchQuery(customBankQuery)
               }),
               redirect: 'follow'
             });

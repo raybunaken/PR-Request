@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchAllCashbackDeals } from '@/lib/cashback-client';
+import { enforceRateLimit } from '@/lib/rate-limiter';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
+  const rateLimitError = enforceRateLimit(req, 60);
+  if (rateLimitError) return rateLimitError;
+
   try {
     const deals = await fetchAllCashbackDeals();
 
