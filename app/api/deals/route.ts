@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchAllDeals } from '@/lib/sheets-client';
+import { fetchAllDealsWithWarnings } from '@/lib/sheets-client';
 import { enforceRateLimit } from '@/lib/rate-limiter';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     const tabParam = searchParams.get('tab');
     const tab = (tabParam === 'all' ? 'all' : 'agent') as 'agent' | 'all';
 
-    const deals = await fetchAllDeals(tab);
+    const { deals, missingPctDeals } = await fetchAllDealsWithWarnings(tab);
 
     const summary = {
       total: deals.length,
@@ -27,6 +27,7 @@ export async function GET(req: NextRequest) {
       success: true,
       tab,
       deals,
+      missingPctDeals,
       summary
     });
   } catch (err: any) {

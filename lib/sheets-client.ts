@@ -43,6 +43,15 @@ export interface DealItem {
   prFileUrl?: string;
 }
 
+export interface MissingPctDeal {
+  dbRow: number;
+  customerName: string;
+  bank: string;
+  tanggalAkad: string;
+  plafond: number;
+  moCode: string;
+}
+
 export function extractHyperlinkUrl(val: any): string {
   const str = String(val || '').trim();
   const m = str.match(/https?:\/\/[^\s"\),]+/);
@@ -307,6 +316,13 @@ async function loadComprehensivePRHistory(sheets: any): Promise<Record<string, {
 }
 
 export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<DealItem[]> {
+  const { deals } = await fetchAllDealsWithWarnings(tab);
+  return deals;
+}
+
+export async function fetchAllDealsWithWarnings(
+  tab: 'agent' | 'all' = 'agent'
+): Promise<{ deals: DealItem[]; missingPctDeals: MissingPctDeal[] }> {
   const sheets = await getSheetsService();
 
   // 1. Ambil data dari Controller Sheet: Daftar Transaksi KPR dengan FORMULA agar dapat URL hyperlink
@@ -333,6 +349,7 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
   const prHistoryMap = await loadComprehensivePRHistory(sheets);
 
   const dealsMap: Record<string, DealItem> = {};
+  const missingPctDeals: MissingPctDeal[] = [];
 
   for (let i = 0; i < ctrlRows.length; i++) {
     const rowNum = i + 2;
@@ -349,15 +366,45 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
     if (!cust) continue;
 
     // Sinkronisasi data persentase agen langsung dari DB Utama jika Controller masih tertinggal
+    let dbGrouping = '';
+    let dbPct = '';
+    let dbPlafond = 0;
+    let dbTglAkad = tglAkad;
+    let dbMoCode = '';
     if (dbRow > 1 && dbRows[dbRow - 1]) {
       const dbRowValues = dbRows[dbRow - 1];
-      const dbPct = String(dbRowValues[17] || '').trim();
+      dbPct = String(dbRowValues[17] || '').trim();
+      dbGrouping = String(dbRowValues[7] || '').trim();
+      dbPlafond = parseNumberClean(dbRowValues[6]);
+      dbTglAkad = String(dbRowValues[4] || tglAkad);
+      dbMoCode = String(dbRowValues[27] || '').trim();
       if (dbPct && dbPct !== '0%' && (!pct || pct === '0%')) {
         pct = dbPct;
       }
     }
 
-    const isDirect = comm === 0 && (statusColK.toLowerCase().includes('direct') || !pct || pct === '0%');
+    const parsedPctVal = parseFloat(String(pct).replace('%', ''));
+    const hasValidPct = !isNaN(parsedPctVal) && parsedPctVal > 0;
+    const isDirect = !hasValidPct && (comm === 0 && (statusColK.toLowerCase().includes('direct') || !pct || pct === '0%'));
+
+    // Deteksi transaksi 'via Agent' yang Plafond > 0 tetapi Kolom R (% Agent) di Master Sheet masih kosong
+    const isCancelled = cust.toLowerCase().includes('cancel');
+    if (
+      isDirect &&
+      dbGrouping.toLowerCase().includes('agent') &&
+      dbPlafond > 0 &&
+      !isCancelled &&
+      (!dbPct || dbPct === '0%')
+    ) {
+      missingPctDeals.push({
+        dbRow,
+        customerName: cust,
+        bank,
+        tanggalAkad: dbTglAkad,
+        plafond: dbPlafond,
+        moCode: dbMoCode
+      });
+    }
 
     // Jika tab 'agent', hanya tampilkan transaksi via agent
     if (tab === 'agent' && isDirect) {
@@ -460,19 +507,21 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
       syncStatus = 'BELUM_ADA';
     }
 
+    const effectiveStatusColK = !isDirect && statusLower.includes('direct') ? 'Belum Dibuat' : statusColK;
+
     const item: DealItem = {
       row: rowNum,
       dbRow,
       customerName: cust,
       bank,
       percentage: isDirect ? '0%' : displayPct,
-      commission: isDirect ? 0 : comm,
+      commission: isDirect ? 0 : (comm > 0 ? comm : targetAmount),
       targetAmount: isDirect ? 0 : targetAmount,
       entity,
       company,
       agentName: isDirect ? 'Direct Customer' : agent.name,
       payeeName: isDirect ? 'Direct Customer' : agent.payeeName,
-      statusColK,
+      statusColK: effectiveStatusColK,
       syncStatus,
       isBtnCombined: isBtn,
       partnerRow: null,
@@ -507,7 +556,7 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
         if (!existing.prFileUrl && prFileUrl) {
           existing.prFileUrl = prFileUrl;
         }
-      } else if (comm >= existing.commission) {
+      } else if (item.commission >= existing.commission) {
         // Ambil data utama dari baris dengan komisi lebih besar (atau baris terbaru)
         dealsMap[custKey] = {
           ...item,
@@ -524,7 +573,7 @@ export async function fetchAllDeals(tab: 'agent' | 'all' = 'agent'): Promise<Dea
     }
   }
 
-  return Object.values(dealsMap);
+  return { deals: Object.values(dealsMap), missingPctDeals };
 }
 
 export async function updateRowStatusInController(

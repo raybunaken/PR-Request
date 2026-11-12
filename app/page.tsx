@@ -80,9 +80,19 @@ interface CompletedItem {
   driveQuotaLimited?: boolean;
 }
 
+interface MissingPctDeal {
+  dbRow: number;
+  customerName: string;
+  bank: string;
+  tanggalAkad: string;
+  plafond: number;
+  moCode: string;
+}
+
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'PR_AGENT' | 'LEADS_FOLDER' | 'CASHBACK'>('PR_AGENT');
   const [deals, setDeals] = useState<DealItem[]>([]);
+  const [missingPctDeals, setMissingPctDeals] = useState<MissingPctDeal[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
@@ -158,6 +168,7 @@ export default function DashboardPage() {
       const data = await res.json();
       if (data.success) {
         setDeals(data.deals);
+        setMissingPctDeals(data.missingPctDeals || []);
         if (tabMode === 'PR_AGENT') {
           setTabCounts(prev => ({ ...prev, agent: data.deals.length }));
         } else {
@@ -897,6 +908,27 @@ export default function DashboardPage() {
                 </div>
               </div>
             </div>
+
+            {missingPctDeals.length > 0 && (
+              <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-900 space-y-1.5">
+                  <p className="font-semibold">
+                    {missingPctDeals.length} transaksi berstatus &quot;via Agent&quot; belum masuk daftar karena Kolom R (% Komisi Agent) di Master Sheet masih kosong:
+                  </p>
+                  <ul className="list-disc list-inside space-y-0.5 text-amber-800">
+                    {missingPctDeals.map(d => (
+                      <li key={d.dbRow}>
+                        <span className="font-bold">{d.customerName}</span> (Baris {d.dbRow}, {d.bank}, {d.tanggalAkad}, Plafond Rp {d.plafond.toLocaleString('id-ID')})
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-amber-700">
+                    Silakan isi persentase agen (85% / 90% / 80% / 50%) pada Kolom R di tab All - Akad Transaction, lalu klik Refresh Data.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Toolbar & Filter Bar */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-6">
