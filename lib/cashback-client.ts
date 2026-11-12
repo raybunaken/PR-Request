@@ -24,6 +24,8 @@ export interface CashbackDealItem {
   folderId?: string;
   folderUrl?: string;
   hasMemo: boolean;
+  memoName?: string;
+  memoUrl?: string;
   hasPr: boolean;
   prUrl?: string;
   prFileId?: string;
@@ -147,6 +149,8 @@ export async function fetchAllCashbackDeals(): Promise<CashbackDealItem[]> {
     let folderId = matchedFolder?.id;
     let folderUrl = matchedFolder ? (matchedFolder.webViewLink || `https://drive.google.com/drive/folders/${matchedFolder.id}`) : '';
     let hasMemo = false;
+    let memoName = '';
+    let memoUrl = '';
     let hasPr = false;
     let prUrl = '';
     let prFileId = '';
@@ -162,6 +166,9 @@ export async function fetchAllCashbackDeals(): Promise<CashbackDealItem[]> {
           const fn = (file.name || '').toLowerCase();
           if (fn.includes('memo') && (fn.includes('cashback') || fn.endsWith('.pdf'))) {
             hasMemo = true;
+            memoName = file.name || '';
+            const targetId = file.shortcutDetails?.targetId || file.id;
+            memoUrl = file.webViewLink || `https://drive.google.com/file/d/${targetId}/view`;
           }
           if (fn.includes('pr request') || fn.includes('pr cashback') || fn.includes('payment requisition')) {
             hasPr = true;
@@ -194,6 +201,8 @@ export async function fetchAllCashbackDeals(): Promise<CashbackDealItem[]> {
       folderId,
       folderUrl,
       hasMemo,
+      memoName,
+      memoUrl,
       hasPr,
       prUrl,
       prFileId,
@@ -203,6 +212,40 @@ export async function fetchAllCashbackDeals(): Promise<CashbackDealItem[]> {
   }
 
   return deals;
+}
+
+/**
+ * Mengambil file Memo Cashback terbaru dari folder Master Memo Drive (diurutkan berdasarkan modifiedTime terbaru)
+ * dengan fallback ke Memo Q4 2026 di KPR_CONFIG.
+ */
+async function resolveLatestMemoForEntity(
+  drive: any,
+  entity: 'NND' | 'WMI'
+): Promise<{ id: string; name: string }> {
+  const fallbackId = entity === 'NND' ? KPR_CONFIG.CASHBACK_MEMO_NND_ID : KPR_CONFIG.CASHBACK_MEMO_WMI_ID;
+  const fallbackName = entity === 'NND' ? KPR_CONFIG.CASHBACK_MEMO_NND_NAME : KPR_CONFIG.CASHBACK_MEMO_WMI_NAME;
+
+  try {
+    const res = await drive.files.list({
+      q: `'${KPR_CONFIG.CASHBACK_MEMO_FOLDER_ID}' in parents and mimeType = 'application/pdf' and trashed = false`,
+      fields: 'files(id, name, modifiedTime)',
+      orderBy: 'modifiedTime desc',
+      pageSize: 30
+    });
+    const files = res.data.files || [];
+    const entityToken = entity.toLowerCase();
+    const matched = files.find((f: any) => {
+      const fn = String(f.name || '').toLowerCase();
+      return fn.includes('memo') && fn.includes(entityToken);
+    });
+    if (matched?.id && matched?.name) {
+      return { id: matched.id, name: matched.name };
+    }
+  } catch (err: any) {
+    console.warn(`[Cashback] Gagal mengambil memo terbaru dari Drive untuk ${entity}:`, err.message);
+  }
+
+  return { id: fallbackId, name: fallbackName };
 }
 
 /**
@@ -239,10 +282,11 @@ export async function processCashbackDealWorkflow(
     }
   }
 
-  // 2. Pasang Shortcut Memo Cashback (NND vs WMI)
+  // 2. Pasang Shortcut Memo Cashback Terbaru (NND vs WMI) secara dinamis dari folder Master Memo Drive
   let memoAttached = false;
-  const memoTargetId = deal.entity === 'NND' ? KPR_CONFIG.CASHBACK_MEMO_NND_ID : KPR_CONFIG.CASHBACK_MEMO_WMI_ID;
-  const memoTargetName = deal.entity === 'NND' ? 'Memo_Cashback_Mortgage_Q3_2026_-NND.pdf' : 'Memo_Cashback_Mortgage_Q3_2026_-WMI.pdf';
+  const latestMemo = await resolveLatestMemoForEntity(drive, deal.entity);
+  const memoTargetId = latestMemo.id;
+  const memoTargetName = latestMemo.name;
 
   try {
     const existingFiles = await drive.files.list({
@@ -250,9 +294,28 @@ export async function processCashbackDealWorkflow(
       fields: 'files(id, name, mimeType, shortcutDetails)'
     });
     const files = existingFiles.data.files || [];
-    const hasMemoAlready = files.some(f => (f.name || '').toLowerCase().includes('memo'));
+    const existingMemos = files.filter(f => (f.name || '').toLowerCase().includes('memo'));
+    const hasLatestAlready = existingMemos.some(
+      f => f.shortcutDetails?.targetId === memoTargetId || f.name === memoTargetName
+    );
+    const tglLower = String(deal.tglAkad || '').toLowerCase();
+    const isQ4OrNewer = /\b(oct|okt|nov|dec|des)\b/.test(tglLower) || /202[7-9]/.test(tglLower);
 
-    if (!hasMemoAlready) {
+    if (existingMemos.length > 0 && !hasLatestAlready && isQ4OrNewer) {
+      // Hapus shortcut memo lama untuk transaksi Q4+ jika ada versi memo yang lebih baru
+      for (const oldMemo of existingMemos) {
+        if (oldMemo.mimeType === 'application/vnd.google-apps.shortcut' && oldMemo.id) {
+          try {
+            await drive.files.update({
+              fileId: oldMemo.id,
+              requestBody: { trashed: true }
+            });
+          } catch {}
+        }
+      }
+    }
+
+    if (existingMemos.length === 0 || (!hasLatestAlready && isQ4OrNewer)) {
       try {
         await drive.files.create({
           requestBody: {

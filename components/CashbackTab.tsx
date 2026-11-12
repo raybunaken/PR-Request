@@ -17,7 +17,7 @@ import {
   Building2,
   DollarSign
 } from 'lucide-react';
-import { CashbackDealItem } from '@/lib/cashback-client';
+import type { CashbackDealItem } from '@/lib/cashback-client';
 
 interface CashbackTabProps {
   onCountUpdate?: (count: number) => void;
@@ -469,14 +469,31 @@ export default function CashbackTab({ onCountUpdate }: CashbackTabProps) {
                       </td>
 
                       <td className="py-3.5 px-4">
-                        {deal.hasMemo ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                            <FileText className="w-3 h-3" />
-                            <span>Memo {deal.entity}</span>
-                          </span>
-                        ) : (
+                        {deal.hasMemo ? (() => {
+                          const mn = String(deal.memoName || '');
+                          const qMatch = mn.match(/Q[1-4][_\s]*20\d{2}/i);
+                          const labelSuffix = qMatch
+                            ? ` (${qMatch[0].replace(/_/g, ' ')})`
+                            : mn.toLowerCase().includes('april')
+                              ? ' (Apr 2026)'
+                              : '';
+                          const badgeContent = (
+                            <span
+                              title={mn || `Memo ${deal.entity}`}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors"
+                            >
+                              <FileText className="w-3 h-3" />
+                              <span>Memo {deal.entity}{labelSuffix}</span>
+                            </span>
+                          );
+                          return deal.memoUrl ? (
+                            <a href={deal.memoUrl} target="_blank" rel="noopener noreferrer">
+                              {badgeContent}
+                            </a>
+                          ) : badgeContent;
+                        })() : (
                           <span className="text-[11px] text-slate-400 italic">
-                            Akan dipasang
+                            Akan dipasang (Terbaru)
                           </span>
                         )}
                       </td>
