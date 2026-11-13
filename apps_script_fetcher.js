@@ -134,7 +134,7 @@ function executeCreatePRAndAgreement(data) {
   prSheet.getRange('D34').setRichTextValue(richLink);
 
   prSheet.getRange('B38').setValue('Fransisca Octarina');
-  prSheet.getRange('D38').setValue('Cheung Yik');
+  prSheet.getRange('D38').setValue('Bharat M Buxani');
 
   SpreadsheetApp.flush();
 

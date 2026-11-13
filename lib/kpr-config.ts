@@ -35,7 +35,7 @@ export const KPR_CONFIG = {
   // Master Metadata
   REQUESTER_NAME: 'Fransisca Octarina',
   REQUESTER_DEPT: 'CEO Team',
-  APPROVER_BU_HEAD: 'Cheung Yik',
+  APPROVER_BU_HEAD: 'Bharat M Buxani',
 
   // 4 Master Data Agen Aktif
   AGENTS: {

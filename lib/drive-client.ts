@@ -200,8 +200,8 @@ export async function syncPRSpreadsheetInDrive(
         { range: "'PR Request'!G25", values: [['=D22']] },
         { range: "'PR Request'!G32", values: [['=G25']] },
         { range: "'PR Request'!D34", values: [[`=HYPERLINK("${leadFolderUrl}", "${deal.customerName}")`]] },
-        { range: "'PR Request'!B38", values: [['Fransisca Octarina']] },
-        { range: "'PR Request'!D38", values: [['Cheung Yik']] }
+        { range: "'PR Request'!B38", values: [[KPR_CONFIG.REQUESTER_NAME]] },
+        { range: "'PR Request'!D38", values: [[KPR_CONFIG.APPROVER_BU_HEAD]] }
       ];
 
       await sheets.spreadsheets.values.batchUpdate({
