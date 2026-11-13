@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { DealItem, updateRowStatusInController, updateRowLeadsFolderInController } from '@/lib/sheets-client';
+import { DealItem, updateRowStatusInController, updateRowLeadsFolderInController, getSheetsService } from '@/lib/sheets-client';
 import { generatePRExcelBuffer } from '@/lib/pr-builder';
 import { generateAgreementPdfBuffer } from '@/lib/agreement-builder';
 import { isDriveFolderAccessible, processDealDriveWorkflow, getOrCreateFinanceLeadFolder } from '@/lib/drive-client';
@@ -84,6 +84,7 @@ export async function POST(req: NextRequest) {
                   agentAccountNumber: agent.accountNumber,
                   agentAccountName: agent.accountName,
                   amount: deal.targetAmount,
+                  approverName: KPR_CONFIG.APPROVER_BU_HEAD,
                   prFileName: `PR Request - Referral Fee Agent a.n. ${agent.name} - ${cleanCust}`,
                   agreementFileName: agreementFileName,
                   agreementBase64: agreementPdfBuffer.toString('base64')
@@ -96,6 +97,22 @@ export async function POST(req: NextRequest) {
                 if (gasData.success) {
                   if (gasData.prUrl) prUrl = gasData.prUrl;
                   if (gasData.agreementUrl) agreementUrl = gasData.agreementUrl;
+
+                  // Pastikan sel D38 (Approver) selalu terisi nama BU Head terbaru
+                  const targetPrId = gasData.prId || (prUrl.match(/spreadsheets\/d\/([a-zA-Z0-9_-]+)/)?.[1]);
+                  if (targetPrId) {
+                    try {
+                      const sheets = await getSheetsService();
+                      await sheets.spreadsheets.values.update({
+                        spreadsheetId: targetPrId,
+                        range: "'PR Request'!D38",
+                        valueInputOption: 'USER_ENTERED',
+                        requestBody: { values: [[KPR_CONFIG.APPROVER_BU_HEAD]] }
+                      });
+                    } catch (e: any) {
+                      console.warn(`Peringatan: Gagal update D38 via Sheets API:`, e.message);
+                    }
+                  }
                 }
               }
             } catch (gasErr: any) {
