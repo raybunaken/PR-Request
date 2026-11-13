@@ -383,6 +383,23 @@ export async function fetchAllDealsWithWarnings(
       }
     }
 
+    // Pewarisan otomatis persentase agen antar-transaksi BTN jika salah satu baris (SP3K atau Akad) kosong
+    if (bank.toLowerCase().includes('btn') && (!pct || pct === '0%')) {
+      const custNorm = normalizeName(cust);
+      for (let j = dbRows.length - 1; j >= 1; j--) {
+        const otherRow = dbRows[j];
+        if (normalizeName(otherRow[1]) === custNorm && String(otherRow[5] || '').toLowerCase().includes('btn')) {
+          const otherPct = String(otherRow[17] || '').trim();
+          if (otherPct && otherPct !== '0%') {
+            pct = otherPct;
+            dbPct = otherPct;
+            dbGrouping = 'via Agent';
+            break;
+          }
+        }
+      }
+    }
+
     const parsedPctVal = parseFloat(String(pct).replace('%', ''));
     const hasValidPct = !isNaN(parsedPctVal) && parsedPctVal > 0;
     const isDirect = !hasValidPct && (comm === 0 && (statusColK.toLowerCase().includes('direct') || !pct || pct === '0%'));
@@ -496,9 +513,13 @@ export async function fetchAllDealsWithWarnings(
     const statusLower = statusColK.toLowerCase();
 
     if (prFileUrl || statusLower.includes('ditimpa') || statusLower.includes('sinkron')) {
-      syncStatus = 'SINKRON';
+      if (comm > 0 && targetAmount > 0 && Math.abs(comm - targetAmount) > 500) {
+        syncStatus = 'PERLU_TIMPA';
+      } else {
+        syncStatus = 'SINKRON';
+      }
     } else if (statusLower.includes('sudah ada pr')) {
-      if (custKey.includes('dewi suyenti') || custKey.includes('sinergi lintas global')) {
+      if (custKey.includes('dewi suyenti') || custKey.includes('sinergi lintas global') || (comm > 0 && targetAmount > 0 && Math.abs(comm - targetAmount) > 500)) {
         syncStatus = 'PERLU_TIMPA';
       } else {
         syncStatus = 'SINKRON';
@@ -545,6 +566,18 @@ export async function fetchAllDealsWithWarnings(
         existing.isBtnCombined = true;
         existing.partnerRow = rowNum;
         existing.targetAmount = targetAmount;
+        if (targetAmount > existing.commission) {
+          existing.commission = targetAmount;
+        }
+        existing.plafond = Math.max(existing.plafond || 0, smartPlafond || 0);
+        if (existing.percentage === '0%' && displayPct !== '0%') {
+          existing.percentage = displayPct;
+          existing.agentName = agent.name;
+          existing.payeeName = agent.payeeName;
+        }
+        if (Math.abs(existing.commission - existing.targetAmount) > 500 || existing.targetAmount > (comm || 0)) {
+          existing.syncStatus = 'PERLU_TIMPA';
+        }
         if (!existing.leadsFolderUrl && leadsFolderUrl) {
           existing.leadsFolderUrl = leadsFolderUrl;
           existing.hasLeadsFolder = true;

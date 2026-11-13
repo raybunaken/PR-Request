@@ -119,8 +119,30 @@ export function combineBTNTransactions(
     return { dealData, partnerDbRow: null };
   }
 
-  const currentComm = calculateSmartCommission(allDbRows[dealData.dbRow - 1]);
-  const partnerComm = calculateSmartCommission(partnerRaw);
+  const currentRaw = allDbRows[dealData.dbRow - 1] || [];
+  let effectiveCurrentRaw = [...currentRaw];
+  let effectivePartnerRaw = [...partnerRaw];
+
+  const currentPct = String(currentRaw[17] || '').trim();
+  const partnerPct = String(partnerRaw[17] || '').trim();
+
+  // Pewarisan otomatis persentase agen jika salah satu baris BTN (SP3K atau Akad) kosong
+  if ((!currentPct || currentPct === '0%') && partnerPct && partnerPct !== '0%') {
+    effectiveCurrentRaw[17] = partnerPct;
+  } else if ((!partnerPct || partnerPct === '0%') && currentPct && currentPct !== '0%') {
+    effectivePartnerRaw[17] = currentPct;
+  }
+
+  const currentGrouping = String(currentRaw[7] || '').trim();
+  const partnerGrouping = String(partnerRaw[7] || '').trim();
+  if (currentGrouping.toLowerCase().includes('agent') && !partnerGrouping.toLowerCase().includes('agent')) {
+    effectivePartnerRaw[7] = currentGrouping;
+  } else if (partnerGrouping.toLowerCase().includes('agent') && !currentGrouping.toLowerCase().includes('agent')) {
+    effectiveCurrentRaw[7] = partnerGrouping;
+  }
+
+  const currentComm = calculateSmartCommission(effectiveCurrentRaw);
+  const partnerComm = calculateSmartCommission(effectivePartnerRaw);
 
   const currentPlafond = parseNumberClean(dealData.plafond);
   const partnerPlafond = parseNumberClean(partnerRaw[6]);
