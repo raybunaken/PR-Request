@@ -57,13 +57,13 @@ export function calculateSmartCommission(rowValues: any[]): SmartCommissionResul
     }
   }
 
-  // Perhitungan Khusus Bank Muamalat (PPh 23 dihitung 2% dari DPP setelah potong PPN 11%)
+  // Perhitungan Khusus Bank Muamalat & Bank BTN (PPh 23 dihitung 2% dari DPP setelah potong PPN 11%)
   const bankNameRaw = String(rowValues[5] || '').toLowerCase();
-  if (bankNameRaw.includes('muamalat') && grossBankComm > 0 && pctVal > 0) {
+  if ((bankNameRaw.includes('muamalat') || bankNameRaw.includes('btn')) && grossBankComm > 0 && pctVal > 0) {
     const dpp = grossBankComm / 1.11;
     const pph23 = dpp * 0.02;
-    const netMuamalat = grossBankComm - pph23;
-    finalAmount = Math.round(netMuamalat * pctVal);
+    const netBank = grossBankComm - pph23;
+    finalAmount = Math.round(netBank * pctVal);
   }
 
   // ATURAN RESMI FINANCE: Potongan Biaya Transfer Bank (Bank Fee Rp 2.900 per transaksi)
@@ -71,12 +71,12 @@ export function calculateSmartCommission(rowValues: any[]): SmartCommissionResul
   if (finalAmount > 0 && pctVal > 0) {
     const bankName = String(rowValues[5] || '').toLowerCase();
     const custName = normalizeName(rowValues[1] || '');
-    const isTakeover = String(rowValues[3] || '').toLowerCase().includes('takeover');
     
     // Bank yang membebankan biaya transfer antar-bank ke rekening penampung kita (Danamon, INA, Bukopin, UOB)
     if (bankName.includes('danamon') || bankName.includes('ina') || bankName.includes('bukopin') || bankName.includes('uob')) {
-      // Dewi Suyenti, Andre Wilson Siregar, dan Takeover Danamon (e.g. Septa Afrian Nandoe): 2 transaksi -> 2 x Rp 2.900 = Rp 5.800 * % Agen
-      const numTrx = custName.includes('dewi suyenti') || custName.includes('andre wilson') || (bankName.includes('danamon') && isTakeover) ? 2 : 1;
+      // Dewi Suyenti, Andre Wilson Siregar (2 pencairan/split transaksi): 2 transaksi -> 2 x Rp 2.900 = Rp 5.800 * % Agen
+      // Transaksi Danamon standar (termasuk Krisectio, Punagi, dll): 1 transaksi -> 1 x Rp 2.900 * % Agen
+      const numTrx = custName.includes('dewi suyenti') || custName.includes('andre wilson') ? 2 : 1;
       const bankFeeDeduction = Math.round(numTrx * 2900 * pctVal);
       finalAmount = finalAmount - bankFeeDeduction;
     }
