@@ -700,17 +700,9 @@ export default function DashboardPage() {
               99
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-bold tracking-tight text-slate-900">
-                  99 Group &bull; KPR Mortgage Operations Hub
-                </h1>
-                <span className="text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
-                  Automation
-                </span>
-              </div>
-              <p className="text-xs text-slate-500">
-                Otomasi Pembayaran Komisi Agent, Agreement, dan Folder Bukti Finance
-              </p>
+              <h1 className="text-base sm:text-lg font-bold tracking-tight text-slate-900">
+                Mortgage Ops Automation
+              </h1>
             </div>
           </div>
 

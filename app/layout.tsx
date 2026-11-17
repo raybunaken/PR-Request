@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'KPR PR Request & Agreement Management',
+  title: 'Mortgage Ops Automation',
   description: 'Automasi Pembuatan PR Request dan Agreement Agen KPR 99 Group',
 };
 
